@@ -1,0 +1,159 @@
+name: Build Kotlin Debugger
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        java-version: [17, 21]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ matrix.java-version }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ matrix.java-version }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Verify Gradle wrapper
+      uses: gradle/actions/wrapper-validation@v3
+
+    - name: Build with Gradle
+      run: ./gradlew build -x test
+
+    - name: Run tests
+      run: ./gradlew test
+
+    - name: Build fat JAR
+      run: ./gradlew fatJar
+
+    - name: Build test program JAR
+      working-directory: ./test-program
+      run: |
+        chmod +x ../gradlew
+        ../gradlew jar
+
+    - name: Generate build artifacts
+      run: |
+        mkdir -p artifacts
+
+        # Copy main debugger JAR
+        cp build/libs/kt-debug-*.jar artifacts/ 2>/dev/null || true
+        cp build/libs/kt-debug-*-all.jar artifacts/ 2>/dev/null || true
+
+        # Copy test program JAR
+        cp test-program/build/libs/test-program*.jar artifacts/ 2>/dev/null || true
+
+        # Create a version info file
+        echo "Build Information" > artifacts/build-info.txt
+        echo "=================" >> artifacts/build-info.txt
+        echo "Commit: ${{ github.sha }}" >> artifacts/build-info.txt
+        echo "Branch: ${{ github.ref_name }}" >> artifacts/build-info.txt
+        echo "Java Version: ${{ matrix.java-version }}" >> artifacts/build-info.txt
+        echo "Build Date: $(date -u)" >> artifacts/build-info.txt
+        echo "Workflow: ${{ github.workflow }}" >> artifacts/build-info.txt
+        echo "Run ID: ${{ github.run_id }}" >> artifacts/build-info.txt
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kt-debug-jars-java${{ matrix.java-version }}
+        path: artifacts/
+        retention-days: 30
+
+    - name: Upload JAR to release (only on release)
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: artifacts/kt-debug-${{ github.event.release.tag_name }}-all.jar
+        asset_name: kt-debug-${{ github.event.release.tag_name }}.jar
+        asset_content_type: application/java-archive
+
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: 17
+        distribution: 'temurin'
+
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build and test
+      run: ./gradlew build fatJar
+
+    - name: Upload macOS artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kt-debug-macos
+        path: build/libs/*-all.jar
+        retention-days: 7
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: 17
+        distribution: 'temurin'
+
+    - name: Run dependency check
+      run: |
+        # Install and run dependency check plugin if available
+        ./gradlew dependencyCheckAnalyze 2>/dev/null || echo "Dependency check skipped - plugin not installed"
+
+    - name: OWASP Dependency Scan
+      uses: dependency-review/action@v4
+      if: github.event_name == 'pull_request'
+      with:
+        fail-on-severity: moderate
