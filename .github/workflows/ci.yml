@@ -1,107 +1,49 @@
-name: Continuous Integration
+name: CI - Build and Test
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
     branches: [ main ]
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
-
-    services:
-      # Add any services needed for testing here
-
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Fetch full history for better analysis
 
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
-        java-version: 17
+        java-version: '17'
         distribution: 'temurin'
+        cache: gradle
 
-    - name: Cache Gradle packages
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
 
-    - name: Run pre-commit checks
-      run: |
-        # Check if files have proper permissions
-        find . -name "*.sh" -type f -exec chmod +x {} \;
-        find . -name "gradlew" -type f -exec chmod +x {} \;
+    - name: Build with Gradle
+      run: ./gradlew build
 
     - name: Run tests
-      run: ./gradlew test --continue
+      run: ./gradlew test
 
-    - name: Generate test report
-      uses: dorny/test-reporter@v1
-      if: success() || failure()
+    - name: Build Fat JAR
+      run: ./gradlew fatJar
+
+    - name: Upload JAR artifact
+      uses: actions/upload-artifact@v4
       with:
-        name: Kotlin Tests
-        path: build/test-results/test/TEST-*.xml
-        reporter: java-junit
+        name: kotlin-debugger-jar
+        path: build/libs/*-all.jar
+        retention-days: 30
 
-    - name: Check code coverage
-      run: |
-        # Add JaCoCo coverage if configured
-        ./gradlew jacocoTestReport 2>/dev/null || echo "JaCoCo not configured"
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      if: success()
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
       with:
-        files: build/reports/jacoco/jacocoTestReport.xml
-        fail_ci_if_error: false
-
-  lint:
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: 17
-        distribution: 'temurin'
-
-    - name: Cache Gradle packages
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-
-    - name: Run code quality checks
-      continue-on-error: true
-      run: |
-        chmod +x gradlew
-
-        # Run ktlint if configured
-        echo "Checking for ktlint..."
-        if ./gradlew tasks | grep -q "ktlint"; then
-          ./gradlew ktlintCheck
-        else
-          echo "ktlint not configured"
-        fi
-
-        # Run detekt if configured
-        echo "Checking for detekt..."
-        if ./gradlew tasks | grep -q "detekt"; then
-          ./gradlew detekt
-        else
-          echo "detekt not configured"
-        fi
+        name: test-results
+        path: build/reports/tests/test/
+        retention-days: 7
