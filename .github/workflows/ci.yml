@@ -85,10 +85,23 @@ jobs:
           ~/.gradle/wrapper
         key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
 
-    - name: Run ktlint
+    - name: Run code quality checks
+      continue-on-error: true
       run: |
-        ./gradlew ktlintCheck 2>/dev/null || echo "ktlint not configured"
+        chmod +x gradlew
 
-    - name: Run detekt
-      run: |
-        ./gradlew detekt 2>/dev/null || echo "detekt not configured"
+        # Run ktlint if configured
+        echo "Checking for ktlint..."
+        if ./gradlew tasks | grep -q "ktlint"; then
+          ./gradlew ktlintCheck
+        else
+          echo "ktlint not configured"
+        fi
+
+        # Run detekt if configured
+        echo "Checking for detekt..."
+        if ./gradlew tasks | grep -q "detekt"; then
+          ./gradlew detekt
+        else
+          echo "detekt not configured"
+        fi
