@@ -130,6 +130,8 @@ fi
 # 清理之前的构建
 print_info "清理之前的构建..."
 ./gradlew clean
+rm -rf release/kotlin-debugger-1.0-SNAPSHOT-all.jar
+rm -rf release/InteractiveTest.jar
 
 # 根据参数决定是否运行测试
 if [ "$SKIP_TESTS" = false ]; then
