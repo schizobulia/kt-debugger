@@ -1,82 +1,109 @@
-# Kotlin Debugger for VSCode
+# Kotlin Debug Extension for VSCode
 
-Kotlin debugging support for Visual Studio Code.
+基于 kotlin-debugger 项目的 VSCode 调试扩展，支持通过 DAP 协议调试 Kotlin 程序。
 
-## Features
+## 功能
 
-- Set breakpoints in Kotlin files
-- Step through code (Step Over, Step Into, Step Out)
-- View variables and call stack
-- Support for inline functions
+- 支持 attach 模式连接到运行中的 JVM
+- 设置和管理断点
+- 查看调用堆栈
+- 查看变量
 
-## Requirements
+## 安装
 
-- Java 17 or higher
-- Kotlin debugger JAR file
-
-## Installation
-
-1. Build the Kotlin debugger:
+1. 构建 kotlin-debugger：
    ```bash
-   cd ..
-   bash scripts/build.sh
+   cd /path/to/kt-debug
+   ./gradlew fatJar
    ```
 
-2. Install VSCode extension dependencies:
+2. 安装扩展依赖并编译：
    ```bash
    cd vscode-kotlin-debug
    npm install
-   ```
-
-3. Compile the extension:
-   ```bash
    npm run compile
    ```
 
-4. Install the extension:
-   - Press F5 in VSCode to open Extension Development Host
-   - Or package and install: `vsce package && code --install-extension kotlin-debug-1.0.0.vsix`
-
-## Usage
-
-1. Open a Kotlin project in VSCode
-
-2. Create a `.vscode/launch.json` file:
-   ```json
-   {
-     "version": "0.2.0",
-     "configurations": [
-       {
-         "type": "kotlin",
-         "request": "launch",
-         "name": "Debug Kotlin",
-         "mainClass": "MainKt",
-         "classpath": ["${workspaceFolder}/build/classes/kotlin/main"]
-       }
-     ]
-   }
+3. 打包扩展：
+   ```bash
+   npm run package
    ```
 
-3. Set breakpoints by clicking in the gutter
+4. 在 VSCode 中安装生成的 `.vsix` 文件
 
-4. Press F5 to start debugging
+## 使用方法
 
-## Configuration
+### 1. 启动目标程序（带调试参数）
 
-### Launch Configuration
+```bash
+java -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005 -jar your-app.jar
+```
 
-- `mainClass`: Main class to debug (required)
-- `classpath`: Array of classpath entries
-- `jvmArgs`: JVM arguments
-- `args`: Program arguments
-- `debuggerPath`: Path to kotlin-debugger JAR
+### 2. 配置 launch.json
 
-### Attach Configuration
+在项目的 `.vscode/launch.json` 中添加：
 
-- `host`: Host to attach to (default: localhost)
-- `port`: Port to attach to (required)
-- `debuggerPath`: Path to kotlin-debugger JAR
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "kotlin",
+      "request": "attach",
+      "name": "Kotlin: Attach to JVM",
+      "host": "localhost",
+      "port": 5005,
+      "sourcePaths": [
+        "${workspaceFolder}/src/main/kotlin"
+      ]
+    }
+  ]
+}
+```
 
-## License
+### 3. 开始调试
 
-MIT
+1. 在 Kotlin 源文件中设置断点
+2. 按 F5 或点击 "Run and Debug"
+3. 选择 "Kotlin: Attach to JVM" 配置
+
+## 配置选项
+
+| 选项 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `host` | string | "localhost" | 目标 JVM 主机地址 |
+| `port` | number | 必填 | 调试端口 |
+| `sourcePaths` | string[] | [] | Kotlin 源代码路径 |
+
+## 开发
+
+### 调试扩展
+
+1. 在 VSCode 中打开此扩展项目
+2. 按 F5 启动扩展开发宿主
+3. 在新窗口中测试调试功能
+
+### 项目结构
+
+```
+vscode-kotlin-debug/
+├── package.json        # 扩展配置
+├── tsconfig.json       # TypeScript 配置
+├── src/
+│   └── extension.ts    # 扩展入口
+└── out/                # 编译输出
+```
+
+## 故障排除
+
+1. **找不到 JAR 文件**
+   - 确保已运行 `./gradlew fatJar`
+   - JAR 文件位于 `build/libs/kotlin-debugger-1.0-SNAPSHOT-all.jar`
+
+2. **连接失败**
+   - 确保目标程序使用正确的调试参数启动
+   - 检查端口是否正确且未被占用
+
+3. **断点不生效**
+   - 确保 `sourcePaths` 配置正确指向源代码目录
+   - 确保源代码与运行的程序版本一致

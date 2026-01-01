@@ -18,6 +18,10 @@ class LaunchHandler(private val server: DAPServer) : RequestHandler {
         val jvmArgs = args["jvmArgs"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
         val programArgs = args["args"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
         val noDebug = args["noDebug"]?.jsonPrimitive?.booleanOrNull ?: false
+        
+        // 解析源路径配置
+        val sourcePaths = args["sourcePaths"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+        server.sourcePathResolver.setSourcePaths(sourcePaths)
 
         val target = DebugTarget.Launch(
             mainClass = mainClass,
@@ -65,6 +69,10 @@ class AttachHandler(private val server: DAPServer) : RequestHandler {
         val host = args?.get("host")?.jsonPrimitive?.content ?: "localhost"
         val port = args?.get("port")?.jsonPrimitive?.int
             ?: throw IllegalArgumentException("port is required")
+
+        // 解析源路径配置
+        val sourcePaths = args["sourcePaths"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+        server.sourcePathResolver.setSourcePaths(sourcePaths)
 
         val target = DebugTarget.Attach(host = host, port = port)
 

@@ -5,6 +5,7 @@ import com.kotlindebugger.dap.DAPServer
 import com.kotlindebugger.dap.protocol.Breakpoint
 import com.kotlindebugger.dap.protocol.Source
 import kotlinx.serialization.json.*
+import java.io.File
 
 class SetBreakpointsHandler(private val server: DAPServer) : RequestHandler {
     override val command = "setBreakpoints"
@@ -17,34 +18,42 @@ class SetBreakpointsHandler(private val server: DAPServer) : RequestHandler {
         val sourcePath = source?.get("path")?.jsonPrimitive?.content
             ?: throw IllegalArgumentException("source.path is required")
 
+        // 提取文件名用于断点匹配
+        val fileName = File(sourcePath).name
+        
         val breakpoints = args["breakpoints"]?.jsonArray ?: JsonArray(emptyList())
 
-        // 清除该文件的所有断点
+        // 清除该文件的所有断点（按文件名匹配）
         val existingBreakpoints = debugSession.listBreakpoints()
         existingBreakpoints.filterIsInstance<com.kotlindebugger.common.model.Breakpoint.LineBreakpoint>()
-            .filter { it.file == sourcePath }.forEach {
+            .filter { 
+                it.file == sourcePath || 
+                it.file == fileName || 
+                File(it.file).name == fileName 
+            }.forEach {
                 debugSession.removeBreakpoint(it.id)
             }
 
-        // 设置新断点
+        // 设置新断点（使用文件名以便JDI匹配）
         val result = breakpoints.map { bp ->
             val line = bp.jsonObject["line"]?.jsonPrimitive?.int
                 ?: throw IllegalArgumentException("breakpoint.line is required")
 
             try {
-                val breakpoint = debugSession.addBreakpoint(sourcePath, line)
+                // 使用文件名进行JDI断点设置
+                val breakpoint = debugSession.addBreakpoint(fileName, line)
                 Breakpoint(
                     id = breakpoint.id,
                     verified = true,
                     line = line,
-                    source = Source(path = sourcePath)
+                    source = Source(name = fileName, path = sourcePath)
                 )
             } catch (e: Exception) {
                 Breakpoint(
                     id = -1,
                     verified = false,
                     line = line,
-                    source = Source(path = sourcePath),
+                    source = Source(name = fileName, path = sourcePath),
                     message = e.message
                 )
             }

@@ -1,6 +1,7 @@
 package com.kotlindebugger.dap
 
 import com.kotlindebugger.core.DebugSession
+import com.kotlindebugger.dap.converter.SourcePathResolver
 import com.kotlindebugger.dap.event.EventEmitter
 import com.kotlindebugger.dap.handler.*
 import com.kotlindebugger.dap.protocol.DAPRequest
@@ -17,6 +18,7 @@ class DAPServer(
 ) {
     private val dispatcher = RequestDispatcher()
     val eventEmitter = EventEmitter(output)
+    val sourcePathResolver = SourcePathResolver()
     private var debugSession: DebugSession? = null
     private val seqCounter = AtomicInteger(1)
     private val json = Json {

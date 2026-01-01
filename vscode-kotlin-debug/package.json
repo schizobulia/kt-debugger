@@ -1,19 +1,32 @@
 {
   "name": "kotlin-debug",
-  "displayName": "Kotlin Debugger",
-  "version": "1.0.0",
-  "publisher": "kotlin-debugger",
-  "description": "Kotlin debugging support for VSCode",
-  "categories": ["Debuggers"],
-  "keywords": ["kotlin", "debug", "debugger"],
+  "displayName": "Kotlin Debug",
+  "description": "Kotlin debugger for VSCode using kotlin-debugger DAP",
+  "version": "0.1.0",
+  "publisher": "kotlindebugger",
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.80.0"
   },
+  "categories": [
+    "Debuggers"
+  ],
   "activationEvents": [
-    "onDebug"
+    "onDebug",
+    "onDebugResolve:kotlin",
+    "onDebugDynamicConfigurations:kotlin"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Kotlin Debug",
+      "properties": {
+        "kotlin-debug.debuggerJarPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the kotlin-debugger JAR file. If not set, the extension will search in common locations."
+        }
+      }
+    },
     "breakpoints": [
       {
         "language": "kotlin"
@@ -23,56 +36,33 @@
       {
         "type": "kotlin",
         "label": "Kotlin Debug",
-        "program": "./out/debugAdapter.js",
-        "runtime": "node",
+        "languages": [
+          "kotlin"
+        ],
         "configurationAttributes": {
-          "launch": {
-            "required": ["mainClass"],
-            "properties": {
-              "mainClass": {
-                "type": "string",
-                "description": "Main class to debug",
-                "default": "MainKt"
-              },
-              "classpath": {
-                "type": "array",
-                "description": "Classpath entries",
-                "default": []
-              },
-              "jvmArgs": {
-                "type": "array",
-                "description": "JVM arguments",
-                "default": []
-              },
-              "args": {
-                "type": "array",
-                "description": "Program arguments",
-                "default": []
-              },
-              "debuggerPath": {
-                "type": "string",
-                "description": "Path to kotlin-debugger JAR",
-                "default": "${workspaceFolder}/build/libs/kotlin-debugger-1.0-SNAPSHOT-all.jar"
-              }
-            }
-          },
           "attach": {
-            "required": ["host", "port"],
+            "required": [
+              "port"
+            ],
             "properties": {
               "host": {
                 "type": "string",
-                "description": "Host to attach to",
+                "description": "Host to connect to",
                 "default": "localhost"
               },
               "port": {
                 "type": "number",
-                "description": "Port to attach to",
-                "default": 5005
+                "description": "Debug port to connect to"
               },
-              "debuggerPath": {
-                "type": "string",
-                "description": "Path to kotlin-debugger JAR",
-                "default": "${workspaceFolder}/build/libs/kotlin-debugger-1.0-SNAPSHOT-all.jar"
+              "sourcePaths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Source paths for Kotlin files",
+                "default": [
+                  "${workspaceFolder}/src/main/kotlin"
+                ]
               }
             }
           }
@@ -80,33 +70,28 @@
         "initialConfigurations": [
           {
             "type": "kotlin",
-            "request": "launch",
-            "name": "Debug Kotlin",
-            "mainClass": "MainKt",
-            "classpath": ["${workspaceFolder}/build/classes/kotlin/main"]
+            "request": "attach",
+            "name": "Kotlin: Attach to JVM",
+            "host": "localhost",
+            "port": 5005,
+            "sourcePaths": [
+              "${workspaceFolder}/src/main/kotlin"
+            ]
           }
         ],
         "configurationSnippets": [
           {
-            "label": "Kotlin: Launch",
-            "description": "Launch and debug a Kotlin program",
-            "body": {
-              "type": "kotlin",
-              "request": "launch",
-              "name": "Debug Kotlin",
-              "mainClass": "${1:MainKt}",
-              "classpath": ["${workspaceFolder}/build/classes/kotlin/main"]
-            }
-          },
-          {
             "label": "Kotlin: Attach",
-            "description": "Attach to a running Kotlin program",
+            "description": "Attach to a running JVM with debug enabled",
             "body": {
               "type": "kotlin",
               "request": "attach",
-              "name": "Attach to Kotlin",
+              "name": "Kotlin: Attach to JVM",
               "host": "localhost",
-              "port": 5005
+              "port": 5005,
+              "sourcePaths": [
+                "^\"\\${workspaceFolder}/src/main/kotlin\""
+              ]
             }
           }
         ]
@@ -116,14 +101,16 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
   },
   "devDependencies": {
-    "@types/node": "^18.0.0",
-    "@types/vscode": "^1.75.0",
-    "typescript": "^5.0.0"
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
   },
   "dependencies": {
-    "@vscode/debugadapter": "^1.65.0"
+    "@vscode/debugadapter": "^1.64.0"
   }
 }

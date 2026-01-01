@@ -14,13 +14,18 @@ class StackTraceHandler(private val server: DAPServer) : RequestHandler {
             ?: throw IllegalStateException("No debug session")
 
         val stackFrames = debugSession.getStackFrames().mapIndexed { index, frameInfo ->
+            // 使用SourcePathResolver解析完整路径
+            val resolvedPath = frameInfo.location?.let { loc ->
+                server.sourcePathResolver.resolveSourcePath(loc.file)
+            }
+            
             StackFrame(
                 id = index,
                 name = "${frameInfo.className}.${frameInfo.methodName}",
                 source = frameInfo.location?.let {
                     Source(
                         name = it.file.substringAfterLast('/'),
-                        path = it.file
+                        path = resolvedPath
                     )
                 },
                 line = frameInfo.location?.line ?: 0,
