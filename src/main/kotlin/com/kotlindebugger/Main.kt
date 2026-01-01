@@ -5,6 +5,7 @@ import com.kotlindebugger.cli.command.CommandResult
 import com.kotlindebugger.cli.output.OutputFormatter
 import com.kotlindebugger.cli.DebugCompleter
 import com.kotlindebugger.dap.DAPServer
+import com.kotlindebugger.dap.Logger
 import org.jline.reader.LineReaderBuilder
 import org.jline.reader.UserInterruptException
 import org.jline.reader.EndOfFileException
@@ -14,8 +15,46 @@ import org.jline.terminal.TerminalBuilder
  * Kotlin Debugger 主入口
  */
 fun main(args: Array<String>) {
+    // 解析命令行参数
+    var dapMode = false
+    var debugMode = false
+    var logFilePath: String? = null
+    var argIndex = 0
+
+    while (argIndex < args.size) {
+        when (args[argIndex]) {
+            "--dap" -> dapMode = true
+            "--debug", "--log" -> debugMode = true
+            "--log-file" -> {
+                if (argIndex + 1 < args.size) {
+                    logFilePath = args[++argIndex]
+                }
+            }
+            else -> break
+        }
+        argIndex++
+    }
+
+    // 如果启用调试模式，设置Logger
+    if (debugMode) {
+        Logger.enableDebugMode()
+
+        // 如果没有指定日志文件，使用临时文件
+        if (logFilePath == null) {
+            val tempDir = System.getProperty("java.io.tmpdir")
+            val timestamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+            logFilePath = "$tempDir/kotlin-debugger-$timestamp.log"
+        }
+
+        Logger.setLogFile(logFilePath!!)
+        System.err.println("Debug log file: $logFilePath")
+    }
+
     // 检查是否是 DAP 模式
-    if (args.isNotEmpty() && args[0] == "--dap") {
+    if (dapMode) {
+        if (debugMode) {
+            Logger.info("Starting DAP server in DEBUG mode")
+        }
         val dapServer = DAPServer()
         dapServer.start()
         return
@@ -85,6 +124,7 @@ class KotlinDebugger {
               -h, --help      Show this help message
               -v, --version   Show version
               --dap           Start in DAP (Debug Adapter Protocol) mode
+              --debug, --log  Enable debug logging (for DAP mode)
 
             Commands:
               run <class> [-cp path]    Launch and debug a program
@@ -93,7 +133,7 @@ class KotlinDebugger {
             Examples:
               kotlin-debugger run MainKt -cp ./build/classes
               kotlin-debugger attach localhost:5005
-              kotlin-debugger --dap  (starts DAP server for VSCode)
+              kotlin-debugger --dap --debug  (starts DAP server with debug logging)
               kotlin-debugger  (starts interactive mode)
         """.trimIndent())
     }

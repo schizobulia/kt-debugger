@@ -3,6 +3,7 @@ package com.kotlindebugger.dap.handler
 import com.kotlindebugger.core.DebugSession
 import com.kotlindebugger.core.jdi.DebugTarget
 import com.kotlindebugger.dap.DAPServer
+import com.kotlindebugger.dap.Logger
 import com.kotlindebugger.common.model.DebugEvent
 import com.kotlindebugger.core.event.DebugEventListener
 import kotlinx.serialization.json.*
@@ -11,6 +12,8 @@ class LaunchHandler(private val server: DAPServer) : RequestHandler {
     override val command = "launch"
 
     override suspend fun handle(args: JsonObject?, session: DebugSession?): JsonElement? {
+        Logger.info("Handling 'launch' command")
+
         val mainClass = args?.get("mainClass")?.jsonPrimitive?.content
             ?: throw IllegalArgumentException("mainClass is required")
 
@@ -18,10 +21,17 @@ class LaunchHandler(private val server: DAPServer) : RequestHandler {
         val jvmArgs = args["jvmArgs"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
         val programArgs = args["args"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
         val noDebug = args["noDebug"]?.jsonPrimitive?.booleanOrNull ?: false
-        
+
+        Logger.info("Launching: mainClass=$mainClass")
+        Logger.debug("Classpath: $classpath")
+        Logger.debug("JVM args: $jvmArgs")
+        Logger.debug("Program args: $programArgs")
+        Logger.debug("NoDebug: $noDebug")
+
         // 解析源路径配置
         val sourcePaths = args["sourcePaths"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
         server.sourcePathResolver.setSourcePaths(sourcePaths)
+        Logger.debug("Source paths: $sourcePaths")
 
         val target = DebugTarget.Launch(
             mainClass = mainClass,
@@ -31,6 +41,7 @@ class LaunchHandler(private val server: DAPServer) : RequestHandler {
             suspend = !noDebug
         )
 
+        Logger.info("Creating debug session...")
         val debugSession = DebugSession(target)
         server.setDebugSession(debugSession)
         debugSession.addListener(object : DebugEventListener {
@@ -39,25 +50,41 @@ class LaunchHandler(private val server: DAPServer) : RequestHandler {
             }
         })
 
+        Logger.info("Starting debug session...")
         debugSession.start()
+        Logger.info("Debug session started successfully")
+
+        Logger.info("Sending 'initialized' event")
         server.eventEmitter.sendInitialized()
 
         return null
     }
 
     private fun handleDebugEvent(event: DebugEvent) {
+        Logger.debug("Debug event: $event")
         when (event) {
             is DebugEvent.BreakpointHit -> {
+                Logger.info("Breakpoint hit on thread ${event.threadId}")
                 server.eventEmitter.sendStopped("breakpoint", event.threadId.toInt())
             }
             is DebugEvent.StepCompleted -> {
+                Logger.info("Step completed on thread ${event.threadId}")
                 server.eventEmitter.sendStopped("step", event.threadId.toInt())
             }
             is DebugEvent.VMDeath -> {
+                Logger.info("VM death event received")
                 server.eventEmitter.sendExited(0)
                 server.eventEmitter.sendTerminated()
             }
-            else -> {}
+            is DebugEvent.VMStarted -> {
+                Logger.info("VM started")
+            }
+            is DebugEvent.VMDisconnected -> {
+                Logger.info("VM disconnected")
+            }
+            else -> {
+                Logger.debug("Unhandled debug event: $event")
+            }
         }
     }
 }
@@ -91,18 +118,30 @@ class AttachHandler(private val server: DAPServer) : RequestHandler {
     }
 
     private fun handleDebugEvent(event: DebugEvent) {
+        Logger.debug("Debug event: $event")
         when (event) {
             is DebugEvent.BreakpointHit -> {
+                Logger.info("Breakpoint hit on thread ${event.threadId}")
                 server.eventEmitter.sendStopped("breakpoint", event.threadId.toInt())
             }
             is DebugEvent.StepCompleted -> {
+                Logger.info("Step completed on thread ${event.threadId}")
                 server.eventEmitter.sendStopped("step", event.threadId.toInt())
             }
             is DebugEvent.VMDeath -> {
+                Logger.info("VM death event received")
                 server.eventEmitter.sendExited(0)
                 server.eventEmitter.sendTerminated()
             }
-            else -> {}
+            is DebugEvent.VMStarted -> {
+                Logger.info("VM started")
+            }
+            is DebugEvent.VMDisconnected -> {
+                Logger.info("VM disconnected")
+            }
+            else -> {
+                Logger.debug("Unhandled debug event: $event")
+            }
         }
     }
 }

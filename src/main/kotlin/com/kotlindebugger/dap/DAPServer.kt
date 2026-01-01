@@ -8,6 +8,8 @@ import com.kotlindebugger.dap.protocol.DAPRequest
 import com.kotlindebugger.dap.protocol.DAPResponse
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicInteger
@@ -19,6 +21,7 @@ class DAPServer(
     private val dispatcher = RequestDispatcher()
     val eventEmitter = EventEmitter(output)
     val sourcePathResolver = SourcePathResolver()
+    val variableReferenceManager = VariableReferenceManager()
     private var debugSession: DebugSession? = null
     private val seqCounter = AtomicInteger(1)
     private val json = Json {
@@ -48,15 +51,19 @@ class DAPServer(
     }
 
     fun start() {
+        Logger.info("DAP Server starting...")
+        Logger.separator()
+
         try {
             while (true) {
                 val message = readMessage() ?: break
                 handleMessage(message)
             }
         } catch (e: Exception) {
-            System.err.println("DAP Server error: ${e.message}")
-            e.printStackTrace()
+            Logger.error("DAP Server error", e)
         }
+
+        Logger.info("DAP Server stopped")
     }
 
     private fun readMessage(): String? {
@@ -104,19 +111,25 @@ class DAPServer(
 
     private fun handleMessage(message: String) = runBlocking {
         try {
+            Logger.debug("Received message: ${message.take(200)}...")
             val request = json.decodeFromString<DAPRequest>(message)
 
+            Logger.logDAPRequest(request.command, request.seq,
+                if (request.arguments != null) json.encodeToString(JsonObject.serializer(), request.arguments) else null)
+
             val body = try {
+                Logger.debug("Dispatching command: ${request.command}")
                 dispatcher.dispatch(request.command, request.arguments, debugSession)
             } catch (e: Exception) {
+                Logger.error("Error handling command: ${request.command}", e)
                 sendErrorResponse(request, e.message ?: "Unknown error")
                 return@runBlocking
             }
 
+            Logger.debug("Sending response for: ${request.command}")
             sendResponse(request, body)
         } catch (e: Exception) {
-            System.err.println("Failed to handle message: ${e.message}")
-            e.printStackTrace()
+            Logger.error("Failed to handle message", e)
         }
     }
 
@@ -128,6 +141,10 @@ class DAPServer(
             command = request.command,
             body = body
         )
+
+        val bodyStr = if (body != null) json.encodeToString(JsonElement.serializer(), body) else null
+        Logger.logDAPResponse(response.command, response.seq, request.seq, true, bodyStr)
+
         sendMessage(response)
     }
 
@@ -139,6 +156,10 @@ class DAPServer(
             command = request.command,
             message = message
         )
+
+        Logger.logDAPResponse(response.command, response.seq, request.seq, false, message)
+        Logger.error("Error response: $message")
+
         sendMessage(response)
     }
 
