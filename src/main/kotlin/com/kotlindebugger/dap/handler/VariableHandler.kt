@@ -8,6 +8,9 @@ import com.kotlindebugger.dap.protocol.Variable
 import com.kotlindebugger.dap.VariableReferenceType
 import com.sun.jdi.ArrayReference
 import com.sun.jdi.ObjectReference
+import com.sun.jdi.InvalidStackFrameException
+import com.sun.jdi.ObjectCollectedException
+import com.sun.jdi.VMDisconnectedException
 import kotlinx.serialization.json.*
 
 class ScopesHandler(private val server: DAPServer) : RequestHandler {
@@ -26,19 +29,20 @@ class ScopesHandler(private val server: DAPServer) : RequestHandler {
 
         debugSession.selectFrame(frameId)
 
-        // 获取实际的StackFrame对象
+        // 获取当前线程
         val thread = debugSession.getCurrentThread()
             ?: throw IllegalStateException("No current thread")
-        val stackFrame = debugSession.getVirtualMachine()
+        
+        // 获取 JDI ThreadReference
+        val jdiThread = debugSession.getVirtualMachine()
             .allThreads()
             .find { it.uniqueID() == thread.id }
-            ?.frame(frameId)
-            ?: throw IllegalStateException("Frame not found")
+            ?: throw IllegalStateException("Thread not found")
 
-        Logger.debug("Got stack frame: ${stackFrame.location()}")
+        Logger.debug("Got thread: ${jdiThread.name()}, frameId: $frameId")
 
-        // 创建栈帧的变量引用
-        val variablesReference = server.variableReferenceManager.createStackFrameReference(stackFrame)
+        // 创建栈帧的变量引用（存储 threadId 和 frameIndex）
+        val variablesReference = server.variableReferenceManager.createStackFrameReference(jdiThread, frameId)
         Logger.debug("Created variables reference: $variablesReference")
 
         val scopes = listOf(
@@ -68,26 +72,70 @@ class VariablesHandler(private val server: DAPServer) : RequestHandler {
 
         // 获取变量引用
         val varRef = server.variableReferenceManager.getReference(variablesReference)
-            ?: throw IllegalStateException("Invalid variablesReference: $variablesReference")
+        if (varRef == null) {
+            // 变量引用不存在（可能已被清理），返回空列表而不是抛异常
+            Logger.debug("Variable reference not found: $variablesReference, returning empty list")
+            return buildJsonObject {
+                put("variables", Json.encodeToJsonElement(emptyList<Variable>()))
+            }
+        }
 
         Logger.debug("Variable reference type: ${varRef.type}")
 
-        val variables = when (varRef.type) {
-            VariableReferenceType.STACK_FRAME -> {
-                // 获取栈帧的局部变量
-                Logger.debug("Getting stack frame variables")
-                getStackFrameVariables(varRef.stackFrame!!)
+        val variables = try {
+            when (varRef.type) {
+                VariableReferenceType.STACK_FRAME -> {
+                    // 获取栈帧的局部变量
+                    Logger.debug("Getting stack frame variables")
+                    val debugSession = server.getDebugSession()
+                    if (debugSession == null) {
+                        Logger.debug("No debug session, returning empty list")
+                        emptyList()
+                    } else {
+                        val vm = debugSession.getVirtualMachine()
+                        val stackFrame = server.variableReferenceManager.getStackFrame(varRef, vm)
+                        if (stackFrame == null) {
+                            Logger.debug("Stack frame is invalid or thread is running, returning empty list")
+                            emptyList()
+                        } else {
+                            getStackFrameVariables(stackFrame)
+                        }
+                    }
+                }
+                VariableReferenceType.OBJECT_FIELDS -> {
+                    // 获取对象的字段
+                    Logger.debug("Getting object fields")
+                    if (varRef.objectRef == null) {
+                        Logger.debug("Object reference is null, returning empty list")
+                        emptyList()
+                    } else {
+                        getObjectFields(varRef.objectRef)
+                    }
+                }
+                VariableReferenceType.ARRAY_ELEMENTS -> {
+                    // 获取数组元素
+                    Logger.debug("Getting array elements")
+                    val arrayRef = varRef.objectRef as? ArrayReference
+                    if (arrayRef == null) {
+                        Logger.debug("Array reference is null, returning empty list")
+                        emptyList()
+                    } else {
+                        getArrayElements(arrayRef, varRef.arrayStart, varRef.arrayCount)
+                    }
+                }
             }
-            VariableReferenceType.OBJECT_FIELDS -> {
-                // 获取对象的字段
-                Logger.debug("Getting object fields")
-                getObjectFields(varRef.objectRef!!)
-            }
-            VariableReferenceType.ARRAY_ELEMENTS -> {
-                // 获取数组元素
-                Logger.debug("Getting array elements")
-                getArrayElements(varRef.objectRef as ArrayReference, varRef.arrayStart, varRef.arrayCount)
-            }
+        } catch (e: InvalidStackFrameException) {
+            Logger.debug("InvalidStackFrameException: ${e.message}, returning empty list")
+            emptyList()
+        } catch (e: ObjectCollectedException) {
+            Logger.debug("ObjectCollectedException: ${e.message}, returning empty list")
+            emptyList()
+        } catch (e: VMDisconnectedException) {
+            Logger.debug("VMDisconnectedException: ${e.message}, returning empty list")
+            emptyList()
+        } catch (e: Exception) {
+            Logger.debug("Exception while getting variables: ${e.message}, returning empty list")
+            emptyList()
         }
 
         Logger.debug("Returning ${variables.size} variables")
@@ -140,28 +188,45 @@ class VariablesHandler(private val server: DAPServer) : RequestHandler {
      * 获取对象的字段
      */
     private fun getObjectFields(objectRef: ObjectReference): List<Variable> {
-        val refType = objectRef.referenceType()
-        val fields = refType.allFields()
+        // 首先检查对象是否仍然有效
+        try {
+            // 尝试获取对象类型，如果对象已被回收会抛出异常
+            val refType = objectRef.referenceType()
+            val fields = refType.allFields()
 
-        return fields.mapNotNull { field ->
-            try {
-                val value = objectRef.getValue(field)
-                Variable(
-                    name = field.name(),
-                    value = formatValue(value),
-                    type = field.typeName(),
-                    variablesReference = if (value != null) createVariableReference(value) else 0
-                )
-            } catch (e: Exception) {
-                Logger.debug("Failed to get field ${field.name()}: ${e.message}")
-                // 如果获取字段值失败，返回一个错误提示变量
-                Variable(
-                    name = field.name(),
-                    value = "<error: ${e.message}>",
-                    type = field.typeName(),
-                    variablesReference = 0
-                )
+            return fields.mapNotNull { field ->
+                try {
+                    val value = objectRef.getValue(field)
+                    Variable(
+                        name = field.name(),
+                        value = formatValue(value),
+                        type = field.typeName(),
+                        variablesReference = if (value != null) createVariableReference(value) else 0
+                    )
+                } catch (e: ObjectCollectedException) {
+                    Logger.debug("Object collected while getting field ${field.name()}")
+                    Variable(
+                        name = field.name(),
+                        value = "<object collected>",
+                        type = field.typeName(),
+                        variablesReference = 0
+                    )
+                } catch (e: Exception) {
+                    Logger.debug("Failed to get field ${field.name()}: ${e.message}")
+                    Variable(
+                        name = field.name(),
+                        value = "<error: ${e.message}>",
+                        type = field.typeName(),
+                        variablesReference = 0
+                    )
+                }
             }
+        } catch (e: ObjectCollectedException) {
+            Logger.debug("Object has been garbage collected: ${e.message}")
+            return emptyList()
+        } catch (e: Exception) {
+            Logger.debug("Failed to get object fields: ${e.message}")
+            return emptyList()
         }
     }
 
@@ -196,6 +261,13 @@ class VariablesHandler(private val server: DAPServer) : RequestHandler {
         return try {
             when (value) {
                 is ObjectReference -> {
+                    val typeName = value.referenceType().name()
+                    
+                    // String 类型不需要展开（用户通常不需要看内部实现）
+                    if (typeName == "java.lang.String") {
+                        return 0
+                    }
+                    
                     if (value is ArrayReference) {
                         // 数组可以展开
                         server.variableReferenceManager.createArrayElementsReference(value, 0, -1)

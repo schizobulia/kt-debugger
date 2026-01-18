@@ -1,5 +1,7 @@
 package com.kotlindebugger.dap.protocol
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -44,7 +46,11 @@ data class Thread(
 @Serializable
 data class Scope(
     val name: String,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault
     val variablesReference: Int,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault
     val expensive: Boolean = false
 )
 
@@ -53,6 +59,8 @@ data class Variable(
     val name: String,
     val value: String,
     val type: String? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault
     val variablesReference: Int = 0
 )
 
