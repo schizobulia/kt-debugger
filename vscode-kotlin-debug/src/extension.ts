@@ -199,6 +199,7 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
 class KotlinDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
 
     private context: vscode.ExtensionContext;
+    private debuggerProcess: cp.ChildProcess | undefined;
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
@@ -220,6 +221,7 @@ class KotlinDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescript
         }
 
         console.log(`Using kotlin-debugger JAR: ${jarPath}`);
+        logChannel.appendLine(`[Extension] Using kotlin-debugger JAR: ${jarPath}`);
 
         // 使用 java 启动 DAP 服务器，启用调试模式
         const args = [
@@ -229,7 +231,43 @@ class KotlinDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescript
             '--debug'
         ];
 
-        return new vscode.DebugAdapterExecutable('java', args);
+        // 手动启动进程以便捕获 stderr 和崩溃信息
+        this.debuggerProcess = cp.spawn('java', args, {
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
+
+        const proc = this.debuggerProcess;
+
+        // 捕获 stderr 输出（错误日志和崩溃信息）
+        proc.stderr?.on('data', (data: Buffer) => {
+            const message = data.toString();
+            logChannel.appendLine(`[Debugger STDERR] ${message}`);
+        });
+
+        // 监听进程退出事件
+        proc.on('exit', (code, signal) => {
+            if (code !== 0 && code !== null) {
+                logChannel.appendLine(`\n[Extension] ⚠️ Debugger process exited with code: ${code}`);
+                vscode.window.showErrorMessage(`Kotlin Debugger crashed with exit code: ${code}. Check 'Kotlin Debugger Logs' for details.`);
+            } else if (signal) {
+                logChannel.appendLine(`\n[Extension] ⚠️ Debugger process was killed by signal: ${signal}`);
+                vscode.window.showErrorMessage(`Kotlin Debugger was killed by signal: ${signal}. Check 'Kotlin Debugger Logs' for details.`);
+            } else {
+                logChannel.appendLine(`\n[Extension] Debugger process exited normally.`);
+            }
+        });
+
+        // 监听进程错误事件
+        proc.on('error', (err) => {
+            logChannel.appendLine(`\n[Extension] ❌ Failed to start debugger process: ${err.message}`);
+            logChannel.appendLine(`Stack: ${err.stack}`);
+            vscode.window.showErrorMessage(`Failed to start Kotlin Debugger: ${err.message}`);
+        });
+
+        // 使用 DebugAdapterInlineImplementation 包装进程的 stdin/stdout
+        return new vscode.DebugAdapterInlineImplementation(
+            new DebugAdapterStreamWrapper(proc)
+        );
     }
 
     /**
@@ -281,5 +319,97 @@ class KotlinDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescript
             return p.replace('${workspaceFolder}', vscode.workspace.workspaceFolders[0].uri.fsPath);
         }
         return p;
+    }
+}
+
+/**
+ * 包装子进程的 stdin/stdout 以实现 DebugAdapter 接口
+ * 这样可以让 VS Code 通过 DAP 协议与调试器通信，同时我们可以捕获 stderr
+ */
+class DebugAdapterStreamWrapper implements vscode.DebugAdapter {
+
+    private process: cp.ChildProcess;
+    private _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
+    readonly onDidSendMessage: vscode.Event<vscode.DebugProtocolMessage> = this._onDidSendMessage.event;
+
+    private buffer: string = '';
+    private contentLength: number = -1;
+
+    constructor(process: cp.ChildProcess) {
+        this.process = process;
+
+        // 解析来自调试器的 DAP 消息
+        this.process.stdout?.on('data', (data: Buffer) => {
+            this.handleData(data.toString());
+        });
+
+        this.process.stdout?.on('error', (err) => {
+            logChannel.appendLine(`[Extension] stdout error: ${err.message}`);
+        });
+    }
+
+    /**
+     * 处理来自调试器的数据，解析 DAP 消息
+     */
+    private handleData(data: string): void {
+        this.buffer += data;
+
+        while (true) {
+            if (this.contentLength === -1) {
+                // 查找 Content-Length 头
+                const headerEnd = this.buffer.indexOf('\r\n\r\n');
+                if (headerEnd === -1) {
+                    break;
+                }
+
+                const header = this.buffer.substring(0, headerEnd);
+                const match = header.match(/Content-Length:\s*(\d+)/i);
+                if (match) {
+                    this.contentLength = parseInt(match[1], 10);
+                    this.buffer = this.buffer.substring(headerEnd + 4);
+                } else {
+                    // 无效的头，跳过
+                    logChannel.appendLine(`[Extension] Invalid DAP header: ${header}`);
+                    this.buffer = this.buffer.substring(headerEnd + 4);
+                    continue;
+                }
+            }
+
+            if (this.contentLength !== -1 && this.buffer.length >= this.contentLength) {
+                const body = this.buffer.substring(0, this.contentLength);
+                this.buffer = this.buffer.substring(this.contentLength);
+                this.contentLength = -1;
+
+                try {
+                    const message = JSON.parse(body);
+                    this._onDidSendMessage.fire(message);
+                } catch (e) {
+                    logChannel.appendLine(`[Extension] Failed to parse DAP message: ${body}`);
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    /**
+     * 发送消息到调试器
+     */
+    handleMessage(message: vscode.DebugProtocolMessage): void {
+        const json = JSON.stringify(message);
+        const header = `Content-Length: ${Buffer.byteLength(json, 'utf8')}\r\n\r\n`;
+
+        try {
+            this.process.stdin?.write(header + json, 'utf8');
+        } catch (e) {
+            logChannel.appendLine(`[Extension] Failed to send message to debugger: ${e}`);
+        }
+    }
+
+    dispose(): void {
+        this._onDidSendMessage.dispose();
+        if (this.process && !this.process.killed) {
+            this.process.kill();
+        }
     }
 }
