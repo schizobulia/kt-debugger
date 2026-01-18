@@ -143,14 +143,25 @@ class VariablesHandler(private val server: DAPServer) : RequestHandler {
         val refType = objectRef.referenceType()
         val fields = refType.allFields()
 
-        return fields.map { field ->
-            val value = objectRef.getValue(field)
-            Variable(
-                name = field.name(),
-                value = formatValue(value),
-                type = field.typeName(),
-                variablesReference = createVariableReference(value)
-            )
+        return fields.mapNotNull { field ->
+            try {
+                val value = objectRef.getValue(field)
+                Variable(
+                    name = field.name(),
+                    value = formatValue(value),
+                    type = field.typeName(),
+                    variablesReference = if (value != null) createVariableReference(value) else 0
+                )
+            } catch (e: Exception) {
+                Logger.debug("Failed to get field ${field.name()}: ${e.message}")
+                // 如果获取字段值失败，返回一个错误提示变量
+                Variable(
+                    name = field.name(),
+                    value = "<error: ${e.message}>",
+                    type = field.typeName(),
+                    variablesReference = 0
+                )
+            }
         }
     }
 
@@ -179,20 +190,27 @@ class VariablesHandler(private val server: DAPServer) : RequestHandler {
     /**
      * 为变量创建引用ID(如果可以展开)
      */
-    private fun createVariableReference(value: com.sun.jdi.Value): Int {
-        return when (value) {
-            is ObjectReference -> {
-                if (value is ArrayReference) {
-                    // 数组可以展开
-                    server.variableReferenceManager.createArrayElementsReference(value, 0, -1)
-                } else if (value.referenceType().allFields().isNotEmpty()) {
-                    // 有字段的对象可以展开
-                    server.variableReferenceManager.createObjectFieldsReference(value)
-                } else {
-                    0  // 空对象,不可展开
+    private fun createVariableReference(value: com.sun.jdi.Value?): Int {
+        if (value == null) return 0
+        
+        return try {
+            when (value) {
+                is ObjectReference -> {
+                    if (value is ArrayReference) {
+                        // 数组可以展开
+                        server.variableReferenceManager.createArrayElementsReference(value, 0, -1)
+                    } else if (value.referenceType().allFields().isNotEmpty()) {
+                        // 有字段的对象可以展开
+                        server.variableReferenceManager.createObjectFieldsReference(value)
+                    } else {
+                        0  // 空对象,不可展开
+                    }
                 }
+                else -> 0  // 基本类型,不可展开
             }
-            else -> 0  // 基本类型,不可展开
+        } catch (e: Exception) {
+            Logger.debug("Failed to create variable reference: ${e.message}")
+            0  // 发生错误时返回0，表示不可展开
         }
     }
 
