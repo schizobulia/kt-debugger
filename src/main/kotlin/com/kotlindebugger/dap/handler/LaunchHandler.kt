@@ -64,8 +64,11 @@ class LaunchHandler(private val server: DAPServer) : RequestHandler {
         Logger.debug("Debug event: $event")
         when (event) {
             is DebugEvent.BreakpointHit -> {
-                Logger.info("Breakpoint hit on thread ${event.threadId}")
-                server.eventEmitter.sendStopped("breakpoint", event.threadId.toInt())
+                server.eventEmitter.sendStopped(
+                    reason = "breakpoint",
+                    threadId = event.threadId.toInt(),
+                    hitBreakpointIds = listOf(event.breakpoint.id)
+                )
             }
             is DebugEvent.StepCompleted -> {
                 Logger.info("Step completed on thread ${event.threadId}")
@@ -121,8 +124,11 @@ class AttachHandler(private val server: DAPServer) : RequestHandler {
         Logger.debug("Debug event: $event")
         when (event) {
             is DebugEvent.BreakpointHit -> {
-                Logger.info("Breakpoint hit on thread ${event.threadId}")
-                server.eventEmitter.sendStopped("breakpoint", event.threadId.toInt())
+                server.eventEmitter.sendStopped(
+                    reason = "breakpoint",
+                    threadId = event.threadId.toInt(),
+                    hitBreakpointIds = listOf(event.breakpoint.id)
+                )
             }
             is DebugEvent.StepCompleted -> {
                 Logger.info("Step completed on thread ${event.threadId}")

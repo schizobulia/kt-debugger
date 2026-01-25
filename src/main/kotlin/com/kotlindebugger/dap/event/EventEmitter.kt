@@ -1,10 +1,13 @@
 package com.kotlindebugger.dap.event
 
+import com.kotlindebugger.dap.Logger
 import com.kotlindebugger.dap.protocol.DAPEvent
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -19,7 +22,7 @@ class EventEmitter(private val output: OutputStream) {
         ))
     }
 
-    fun sendStopped(reason: String, threadId: Int, allThreadsStopped: Boolean = true) {
+    fun sendStopped(reason: String, threadId: Int, allThreadsStopped: Boolean = true, hitBreakpointIds: List<Int>? = null) {
         send(DAPEvent(
             seq = seqCounter.getAndIncrement(),
             event = "stopped",
@@ -27,6 +30,11 @@ class EventEmitter(private val output: OutputStream) {
                 put("reason", reason)
                 put("threadId", threadId)
                 put("allThreadsStopped", allThreadsStopped)
+                if (hitBreakpointIds != null && hitBreakpointIds.isNotEmpty()) {
+                    putJsonArray("hitBreakpointIds") {
+                        hitBreakpointIds.forEach { add(JsonPrimitive(it)) }
+                    }
+                }
             }
         ))
     }
