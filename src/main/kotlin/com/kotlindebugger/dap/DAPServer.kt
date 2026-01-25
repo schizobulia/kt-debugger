@@ -48,6 +48,7 @@ class DAPServer(
         dispatcher.register(NextHandler(this))
         dispatcher.register(StepInHandler(this))
         dispatcher.register(StepOutHandler(this))
+        dispatcher.register(EvaluateHandler(this))
         dispatcher.register(DisconnectHandler(this))
     }
 

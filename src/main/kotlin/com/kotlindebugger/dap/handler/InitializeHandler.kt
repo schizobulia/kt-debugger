@@ -15,11 +15,12 @@ class InitializeHandler : RequestHandler {
             supportsConfigurationDoneRequest = true,
             supportsFunctionBreakpoints = false,
             supportsConditionalBreakpoints = false,
-            supportsEvaluateForHovers = false,
+            supportsEvaluateForHovers = true,
             supportsStepBack = false,
-            supportsSetVariable = false,
+            supportsSetVariable = true,
             supportsRestartFrame = false,
-            supportsStepInTargetsRequest = false
+            supportsStepInTargetsRequest = false,
+            supportsValueFormattingOptions = true
         )
         return Json.encodeToJsonElement(capabilities)
     }

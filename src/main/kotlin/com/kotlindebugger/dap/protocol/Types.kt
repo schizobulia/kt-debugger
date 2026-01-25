@@ -69,9 +69,10 @@ data class Capabilities(
     val supportsConfigurationDoneRequest: Boolean = true,
     val supportsFunctionBreakpoints: Boolean = false,
     val supportsConditionalBreakpoints: Boolean = false,
-    val supportsEvaluateForHovers: Boolean = false,
+    val supportsEvaluateForHovers: Boolean = true,
     val supportsStepBack: Boolean = false,
-    val supportsSetVariable: Boolean = false,
+    val supportsSetVariable: Boolean = true,
     val supportsRestartFrame: Boolean = false,
-    val supportsStepInTargetsRequest: Boolean = false
+    val supportsStepInTargetsRequest: Boolean = false,
+    val supportsValueFormattingOptions: Boolean = true
 )

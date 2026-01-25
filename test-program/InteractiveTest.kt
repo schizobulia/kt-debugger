@@ -7,7 +7,7 @@ import kotlin.random.Random
  */
 fun main() {
     println("=== Kotlin Debug Test Program ===")
-    println("Commands: calc, list, random, inline, nested, reified, lambda, loop, quit")
+    println("Commands: calc, list, random, inline, nested, reified, lambda, loop, eval, quit")
     println()
 
     val scanner = Scanner(System.`in`)
@@ -48,6 +48,9 @@ fun main() {
             }
             input == "complex" -> {
                 testComplexInline()
+            }
+            input == "eval" -> {
+                testEvaluateExpression()
             }
             input == "help" || input == "?" -> {
                 printHelp()
@@ -90,6 +93,7 @@ fun printHelp() {
           complex  - Test complex inline scenarios
           lambda   - Test lambda expressions
           loop     - Test loop with counter
+          eval     - Test expression evaluation (debug console/watch)
           add X Y  - Add two numbers
           help     - Show this help
           quit     - Exit program
@@ -360,4 +364,127 @@ fun testComplexInline() {
     println("expandedNumber: $expandedNumber")
 
     println("\n=== 内联测试完成 ===")
+}
+
+/**
+ * 测试表达式求值 - 调试控制台和监视器功能测试
+ * 
+ * 在调试时可以测试以下表达式求值场景:
+ * 1. 简单变量: x, name, person
+ * 2. 成员访问: person.name, person.age
+ * 3. 数组访问: numbers[0], matrix[1][2]
+ * 4. 方法调用: person.toString(), numbers.size
+ * 5. 算术表达式: x + y, a * b
+ * 6. 字面量: 42, "hello", true
+ */
+fun testEvaluateExpression() {
+    println("=== Testing Expression Evaluation ===")
+    println("Set breakpoints and test various expressions in debug console/watch window")
+    println()
+
+    // 基础类型变量
+    val intVar = 42
+    val longVar = 9999999999L
+    val doubleVar = 3.14159
+    val boolVar = true
+    val stringVar = "Hello, Kotlin Debugger!"
+    val charVar = 'K'
+
+    // 断点1: 测试基础类型表达式
+    // 监视器中尝试: intVar, stringVar, boolVar, doubleVar
+    println("1. Basic types ready - set breakpoint here")
+    println("   intVar=$intVar, doubleVar=$doubleVar, boolVar=$boolVar")
+
+    // 数组测试
+    val intArray = intArrayOf(10, 20, 30, 40, 50)
+    val stringArray = arrayOf("apple", "banana", "cherry")
+    val matrix = arrayOf(
+        intArrayOf(1, 2, 3),
+        intArrayOf(4, 5, 6),
+        intArrayOf(7, 8, 9)
+    )
+
+    // 断点2: 测试数组表达式
+    // 监视器中尝试: intArray[0], stringArray[1], matrix[1][1]
+    println("2. Arrays ready - set breakpoint here")
+    println("   intArray.size=${intArray.size}, stringArray.size=${stringArray.size}")
+
+    // 对象测试
+    val person = Person("Alice", 30)
+    val student = Student("Bob", 20, "Computer Science")
+    val company = Company("TechCorp", listOf(person, Person("Charlie", 25)))
+
+    // 断点3: 测试对象字段访问
+    // 监视器中尝试: person.name, person.age, student.major, company.employees[0].name
+    println("3. Objects ready - set breakpoint here")
+    println("   person=$person")
+    println("   student=$student")
+
+    // 集合测试
+    val numberList = mutableListOf(1, 2, 3, 4, 5)
+    val nameMap = mapOf("a" to "Alice", "b" to "Bob", "c" to "Charlie")
+    val nameSet = setOf("Alice", "Bob", "Charlie")
+
+    // 断点4: 测试集合表达式
+    // 监视器中尝试: numberList[0], numberList.size, nameMap.size
+    println("4. Collections ready - set breakpoint here")
+    println("   numberList.size=${numberList.size}")
+
+    // 方法调用测试
+    val calculator = Calculator()
+    val result1 = calculator.add(10, 20)
+    val result2 = calculator.multiply(5, 6)
+
+    // 断点5: 测试方法调用表达式
+    // 监视器中尝试: calculator.add(3, 4), person.toString(), numberList.isEmpty()
+    println("5. Method calls ready - set breakpoint here")
+    println("   calculator.add(10, 20)=$result1")
+    println("   calculator.multiply(5, 6)=$result2")
+
+    // 复杂表达式测试
+    val a = 10
+    val b = 20
+    val c = 30
+
+    // 断点6: 测试复杂表达式
+    // 监视器中尝试: a + b, a * b + c, person.age > 25, stringVar.length
+    println("6. Complex expressions ready - set breakpoint here")
+    println("   a=$a, b=$b, c=$c")
+    println("   a + b + c = ${a + b + c}")
+
+    // 嵌套对象测试
+    val nested = NestedContainer(
+        inner = InnerData(
+            value = 100,
+            name = "nested-value",
+            items = listOf("item1", "item2", "item3")
+        )
+    )
+
+    // 断点7: 测试嵌套对象访问
+    // 监视器中尝试: nested.inner.value, nested.inner.name, nested.inner.items[0]
+    println("7. Nested objects ready - set breakpoint here")
+    println("   nested.inner.value=${nested.inner.value}")
+    println("   nested.inner.items.size=${nested.inner.items.size}")
+
+    println()
+    println("=== Expression Evaluation Test Complete ===")
+}
+
+// 测试用数据类
+data class Person(val name: String, val age: Int)
+
+data class Student(val name: String, val age: Int, val major: String)
+
+data class Company(val name: String, val employees: List<Person>)
+
+data class InnerData(val value: Int, val name: String, val items: List<String>)
+
+data class NestedContainer(val inner: InnerData)
+
+class Calculator {
+    fun add(x: Int, y: Int): Int = x + y
+    fun multiply(x: Int, y: Int): Int = x * y
+    fun subtract(x: Int, y: Int): Int = x - y
+    fun divide(x: Int, y: Int): Int = if (y != 0) x / y else 0
 }
