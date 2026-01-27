@@ -7,7 +7,7 @@ import kotlin.random.Random
  */
 fun main() {
     println("=== Kotlin Debug Test Program ===")
-    println("Commands: calc, list, random, inline, nested, reified, lambda, loop, eval, quit")
+    println("Commands: calc, list, random, inline, nested, reified, lambda, loop, eval, cond, quit")
     println()
 
     val scanner = Scanner(System.`in`)
@@ -52,6 +52,9 @@ fun main() {
             input == "eval" -> {
                 testEvaluateExpression()
             }
+            input == "cond" -> {
+                testConditionalBreakpoint()
+            }
             input == "help" || input == "?" -> {
                 printHelp()
             }
@@ -94,6 +97,7 @@ fun printHelp() {
           lambda   - Test lambda expressions
           loop     - Test loop with counter
           eval     - Test expression evaluation (debug console/watch)
+          cond     - Test conditional breakpoints
           add X Y  - Add two numbers
           help     - Show this help
           quit     - Exit program
@@ -487,4 +491,102 @@ class Calculator {
     fun multiply(x: Int, y: Int): Int = x * y
     fun subtract(x: Int, y: Int): Int = x - y
     fun divide(x: Int, y: Int): Int = if (y != 0) x / y else 0
+}
+
+/**
+ * 条件断点测试 - 测试条件断点功能
+ * 
+ * 使用方法:
+ * 1. 在 VSCode 中设置断点，并添加条件
+ * 2. 例如在循环中设置断点，条件为 "i == 5" 或 "i > 7"
+ * 3. 程序只会在条件满足时停止
+ */
+fun testConditionalBreakpoint() {
+    println("=== Conditional Breakpoint Test ===")
+    println()
+    
+    // 测试1: 简单循环条件断点
+    // 建议在下面的行设置断点，条件: i == 5 或 i > 8
+    println("Test 1: Loop with counter (set breakpoint with condition: i == 5)")
+    for (i in 1..10) {
+        val squared = i * i  // 断点行 - 条件: i == 5
+        println("  i=$i, squared=$squared")
+    }
+    println()
+    
+    // 测试2: 基于变量值的条件断点
+    // 建议在下面的行设置断点，条件: value > 50
+    println("Test 2: Value-based condition (set breakpoint with condition: value > 50)")
+    val values = listOf(10, 30, 55, 72, 45, 88, 15)
+    for (value in values) {
+        val doubled = value * 2  // 断点行 - 条件: value > 50
+        println("  value=$value, doubled=$doubled")
+    }
+    println()
+    
+    // 测试3: 字符串条件断点
+    // 建议在下面的行设置断点，条件: name == "Charlie"
+    println("Test 3: String condition (set breakpoint with condition: name == \"Charlie\")")
+    val names = listOf("Alice", "Bob", "Charlie", "David", "Eve")
+    for (name in names) {
+        val greeting = "Hello, $name!"  // 断点行 - 条件: name == "Charlie"
+        println("  $greeting")
+    }
+    println()
+    
+    // 测试4: 布尔条件断点
+    // 建议在下面的行设置断点，条件: isEven
+    println("Test 4: Boolean condition (set breakpoint with condition: isEven)")
+    for (num in 1..6) {
+        val isEven = num % 2 == 0
+        val label = if (isEven) "even" else "odd"  // 断点行 - 条件: isEven
+        println("  num=$num is $label")
+    }
+    println()
+    
+    // 测试5: 对象属性条件断点
+    // 建议在下面的行设置断点，条件: person.age >= 30
+    println("Test 5: Object property condition (set breakpoint with condition: person.age >= 30)")
+    val people = listOf(
+        Person("Alice", 25),
+        Person("Bob", 35),
+        Person("Charlie", 28),
+        Person("David", 42)
+    )
+    for (person in people) {
+        val description = "${person.name} is ${person.age} years old"  // 断点行 - 条件: person.age >= 30
+        println("  $description")
+    }
+    println()
+    
+    // 测试6: 复合条件断点
+    // 建议在下面的行设置断点，条件: x > 3 && y < 8
+    println("Test 6: Compound condition (set breakpoint with condition: x > 3 && y < 8)")
+    for (x in 1..5) {
+        for (y in 1..10) {
+            val product = x * y  // 断点行 - 条件: x > 3 && y < 8
+            if (x == 3 && y == 5) {
+                println("  x=$x, y=$y, product=$product")
+            }
+        }
+    }
+    println()
+    
+    // 测试7: 方法调用条件断点
+    // 建议在下面的行设置断点，条件: items.size > 2
+    println("Test 7: Method call condition (set breakpoint with condition: items.isEmpty())")
+    val itemLists = listOf(
+        listOf("a", "b", "c"),
+        emptyList(),
+        listOf("x"),
+        emptyList(),
+        listOf("m", "n")
+    )
+    for ((index, items) in itemLists.withIndex()) {
+        val status = if (items.isEmpty()) "empty" else "has ${items.size} items"  // 断点行 - 条件: items.isEmpty()
+        println("  List $index: $status")
+    }
+    println()
+    
+    println("=== Conditional Breakpoint Test Complete ===")
 }

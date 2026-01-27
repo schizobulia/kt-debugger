@@ -4,11 +4,20 @@ import com.kotlindebugger.common.model.*
 import com.kotlindebugger.common.util.JdiUtils.safeLineNumber
 import com.kotlindebugger.common.util.JdiUtils.safeSourceName
 import com.kotlindebugger.common.util.JdiUtils.getThreadStatus
+import com.kotlindebugger.core.breakpoint.ConditionEvaluator
 import com.sun.jdi.*
 import com.sun.jdi.event.*
 import com.sun.jdi.request.BreakpointRequest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * 断点信息（包含条件）
+ */
+data class BreakpointInfo(
+    val id: Int,
+    val condition: String?
+)
 
 /**
  * 事件监听器接口
@@ -27,8 +36,11 @@ class EventHandler(private val vm: VirtualMachine) {
     private val running = AtomicBoolean(false)
     private var eventThread: Thread? = null
 
-    // 断点 ID 映射 (BreakpointRequest -> Breakpoint ID)
-    private val breakpointMap = ConcurrentHashMap<BreakpointRequest, Int>()
+    // 断点 ID 和条件映射 (BreakpointRequest -> BreakpointInfo)
+    private val breakpointMap = ConcurrentHashMap<BreakpointRequest, BreakpointInfo>()
+    
+    // 条件表达式求值器
+    private val conditionEvaluator = ConditionEvaluator(vm)
 
     /**
      * 添加事件监听器
@@ -46,9 +58,12 @@ class EventHandler(private val vm: VirtualMachine) {
 
     /**
      * 注册断点请求与 ID 的映射
+     * @param request JDI 断点请求
+     * @param breakpointId 断点 ID
+     * @param condition 条件表达式（可选）
      */
-    fun registerBreakpoint(request: BreakpointRequest, breakpointId: Int) {
-        breakpointMap[request] = breakpointId
+    fun registerBreakpoint(request: BreakpointRequest, breakpointId: Int, condition: String? = null) {
+        breakpointMap[request] = BreakpointInfo(breakpointId, condition)
     }
 
     /**
@@ -143,16 +158,36 @@ class EventHandler(private val vm: VirtualMachine) {
 
     /**
      * 将 JDI 事件转换为 DebugEvent
+     * 对于条件断点，会先评估条件，只有条件满足时才生成事件
      */
     private fun convertEvent(event: Event): DebugEvent? {
         return when (event) {
             is BreakpointEvent -> {
                 val location = event.location()
-                val breakpointId = breakpointMap[event.request()] ?: -1
+                val breakpointInfo = breakpointMap[event.request()]
+                val breakpointId = breakpointInfo?.id ?: -1
+                val condition = breakpointInfo?.condition
+                
+                // 评估条件断点
+                if (condition != null && condition.isNotBlank()) {
+                    val conditionMet = try {
+                        conditionEvaluator.evaluate(condition, event.thread(), location)
+                    } catch (e: Exception) {
+                        System.err.println("Error evaluating breakpoint condition: ${e.message}")
+                        true // 如果条件评估失败，默认停止
+                    }
+                    
+                    if (!conditionMet) {
+                        // 条件不满足，返回 null 让程序继续运行
+                        return null
+                    }
+                }
+                
                 val bp = Breakpoint.LineBreakpoint(
                     id = breakpointId,
                     file = location.safeSourceName() ?: "unknown",
-                    line = location.safeLineNumber()
+                    line = location.safeLineNumber(),
+                    condition = condition
                 )
                 DebugEvent.BreakpointHit(
                     breakpoint = bp,

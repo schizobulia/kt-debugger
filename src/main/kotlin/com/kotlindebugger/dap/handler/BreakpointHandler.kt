@@ -38,10 +38,13 @@ class SetBreakpointsHandler(private val server: DAPServer) : RequestHandler {
         val result = breakpoints.map { bp ->
             val line = bp.jsonObject["line"]?.jsonPrimitive?.int
                 ?: throw IllegalArgumentException("breakpoint.line is required")
+            
+            // 解析条件表达式（VSCode DAP协议）
+            val condition = bp.jsonObject["condition"]?.jsonPrimitive?.contentOrNull
 
             try {
-                // 使用文件名进行JDI断点设置
-                val breakpoint = debugSession.addBreakpoint(fileName, line)
+                // 使用文件名进行JDI断点设置，传递条件表达式
+                val breakpoint = debugSession.addBreakpoint(fileName, line, condition)
                 Breakpoint(
                     id = breakpoint.id,
                     verified = true,

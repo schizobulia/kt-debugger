@@ -14,7 +14,7 @@ class InitializeHandler : RequestHandler {
         val capabilities = Capabilities(
             supportsConfigurationDoneRequest = true,
             supportsFunctionBreakpoints = false,
-            supportsConditionalBreakpoints = false,
+            supportsConditionalBreakpoints = true,
             supportsEvaluateForHovers = true,
             supportsStepBack = false,
             supportsSetVariable = true,

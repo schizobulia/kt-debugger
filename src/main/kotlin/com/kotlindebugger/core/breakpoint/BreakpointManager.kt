@@ -234,6 +234,9 @@ class BreakpointManager(
         }
 
         val entry = breakpoints[breakpointId] ?: return false
+        
+        // 获取断点条件
+        val condition = entry.breakpoint.condition
 
         for (location in locations) {
             try {
@@ -242,7 +245,8 @@ class BreakpointManager(
                 request.enable()
 
                 entry.requests.add(request)
-                eventHandler.registerBreakpoint(request, breakpointId)
+                // 传递条件信息给事件处理器
+                eventHandler.registerBreakpoint(request, breakpointId, condition)
             } catch (e: Exception) {
                 System.err.println("Failed to create breakpoint request: ${e.message}")
             }
