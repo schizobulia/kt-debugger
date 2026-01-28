@@ -31,15 +31,15 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Build with Gradle
-      run: ./gradlew build
+    - name: Build with Gradle (compile only)
+      run: ./gradlew build -x test
 
     - name: Run tests
       id: test
       run: ./gradlew test
 
     - name: Publish Test Results
-      uses: dorny/test-reporter@v1
+      uses: dorny/test-reporter@v1.9.1
       if: always()
       with:
         name: JUnit Test Results
@@ -52,21 +52,35 @@ jobs:
       run: |
         echo "## 🧪 Test Results Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        if [ -d "build/test-results/test" ]; then
-          TOTAL=$(find build/test-results/test -name "*.xml" -exec grep -h "tests=" {} \; | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s}')
-          FAILURES=$(find build/test-results/test -name "*.xml" -exec grep -h "failures=" {} \; | sed 's/.*failures="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s}')
-          ERRORS=$(find build/test-results/test -name "*.xml" -exec grep -h "errors=" {} \; | sed 's/.*errors="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s}')
-          SKIPPED=$(find build/test-results/test -name "*.xml" -exec grep -h "skipped=" {} \; | sed 's/.*skipped="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s}')
+        if [ -d "build/test-results/test" ] && [ "$(find build/test-results/test -name '*.xml' | head -1)" ]; then
+          # Parse test results from XML files
+          TOTAL=0
+          FAILURES=0
+          ERRORS=0
+          SKIPPED=0
+          
+          for xml_file in build/test-results/test/*.xml; do
+            if [ -f "$xml_file" ]; then
+              T=$(grep -oP 'tests="\K[0-9]+' "$xml_file" | head -1 || echo 0)
+              F=$(grep -oP 'failures="\K[0-9]+' "$xml_file" | head -1 || echo 0)
+              E=$(grep -oP 'errors="\K[0-9]+' "$xml_file" | head -1 || echo 0)
+              S=$(grep -oP 'skipped="\K[0-9]+' "$xml_file" | head -1 || echo 0)
+              TOTAL=$((TOTAL + ${T:-0}))
+              FAILURES=$((FAILURES + ${F:-0}))
+              ERRORS=$((ERRORS + ${E:-0}))
+              SKIPPED=$((SKIPPED + ${S:-0}))
+            fi
+          done
           
           echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| ✅ Total Tests | ${TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ❌ Failures | ${FAILURES:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ⚠️ Errors | ${ERRORS:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ⏭️ Skipped | ${SKIPPED:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ Total Tests | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| ❌ Failures | $FAILURES |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⚠️ Errors | $ERRORS |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⏭️ Skipped | $SKIPPED |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          if [ "${FAILURES:-0}" -eq 0 ] && [ "${ERRORS:-0}" -eq 0 ]; then
+          if [ "$FAILURES" -eq 0 ] && [ "$ERRORS" -eq 0 ]; then
             echo "### ✅ All tests passed!" >> $GITHUB_STEP_SUMMARY
           else
             echo "### ❌ Some tests failed. Please check the details above." >> $GITHUB_STEP_SUMMARY
