@@ -1,0 +1,49 @@
+# 源代码和开发文件
+src/**
+.vscode/**
+.github/**
+example/**
+
+# 配置文件
+tsconfig.json
+.gitignore
+.eslintrc.json
+
+# 测试文件
+**/*.test.ts
+**/test/**
+
+# 构建中间产物
+node_modules/**
+*.map
+
+# Git 相关
+.git/**
+.gitattributes
+
+# IDE 文件
+*.swp
+*.swo
+.idea/**
+*.iml
+
+# 文档 (保留 README)
+CHANGELOG.md
+CONTRIBUTING.md
+docs/**
+
+# 打包产物目录 (不包含在 vsix 中)
+dist/**
+
+# 临时文件
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# 不需要的依赖信息
+package-lock.json
+yarn.lock
+
+# 开发脚本
+scripts/**

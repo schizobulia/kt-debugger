@@ -285,4 +285,10 @@ if [ -d "test-program" ]; then
     fi
 fi
 
+# 提示 VSCode 扩展构建
+echo ""
+print_info "如需构建 VSCode 扩展，请运行:"
+echo "  bash scripts/vscode-ext.sh build"
+echo ""
+
 print_success "所有构建任务已完成！"

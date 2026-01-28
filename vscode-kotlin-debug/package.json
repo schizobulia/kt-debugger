@@ -4,11 +4,27 @@
   "description": "Kotlin debugger for VSCode using kotlin-debugger DAP",
   "version": "0.1.0",
   "publisher": "kotlindebugger",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/kt-debug"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/kt-debug/issues"
+  },
+  "homepage": "https://github.com/your-username/kt-debug#readme",
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
     "Debuggers"
+  ],
+  "keywords": [
+    "kotlin",
+    "debug",
+    "debugger",
+    "jvm",
+    "dap"
   ],
   "activationEvents": [
     "onDebug",
@@ -102,7 +118,9 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package"
+    "package": "vsce package --out ./dist/",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf out dist"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
