@@ -127,4 +127,6 @@ release/
 .claude
 
 docs/*
-.github/
+
+# 保留 .github/workflows 目录
+.github/copilot-instructions.md

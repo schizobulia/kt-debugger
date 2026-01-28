@@ -1,0 +1,192 @@
+name: VSCode Extension - Build and Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+    paths:
+      - 'vscode-kotlin-debug/**'
+      - 'src/**'
+      - 'build.gradle.kts'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'vscode-kotlin-debug/**'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to VSCode Marketplace'
+        required: false
+        type: boolean
+        default: false
+      pre_release:
+        description: 'Publish as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-jar:
+    name: Build Debugger JAR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run tests
+        run: ./gradlew test
+
+      - name: Build Fat JAR
+        run: ./gradlew fatJar
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-debugger-jar
+          path: build/libs/kotlin-debugger-*-all.jar
+          retention-days: 7
+
+  build-extension:
+    name: Build VSCode Extension
+    needs: build-jar
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kotlin-debugger-jar
+          path: ./vscode-kotlin-debug/
+
+      - name: Rename JAR file
+        run: |
+          cd vscode-kotlin-debug
+          mv kotlin-debugger-*-all.jar kotlin-debugger.jar
+          ls -la kotlin-debugger.jar
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: vscode-kotlin-debug/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./vscode-kotlin-debug
+        run: npm ci || npm install
+
+      - name: Compile TypeScript
+        working-directory: ./vscode-kotlin-debug
+        run: npm run compile
+
+      - name: Package extension
+        working-directory: ./vscode-kotlin-debug
+        run: |
+          mkdir -p dist
+          npx vsce package --out ./dist/
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: vscode-kotlin-debug/dist/*.vsix
+          retention-days: 30
+
+  publish-extension:
+    name: Publish to VSCode Marketplace
+    needs: build-extension
+    runs-on: ubuntu-latest
+    # 只在推送 tag 或手动触发发布时执行
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')
+    steps:
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vscode-extension
+          path: ./dist/
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Get VSIX file
+        id: vsix
+        run: |
+          VSIX_FILE=$(ls -1 ./dist/*.vsix | head -n1)
+          echo "file=$VSIX_FILE" >> $GITHUB_OUTPUT
+          echo "Found VSIX: $VSIX_FILE"
+
+      - name: Publish to Marketplace
+        if: github.event.inputs.pre_release != 'true'
+        run: vsce publish --packagePath ${{ steps.vsix.outputs.file }} -p ${{ secrets.VSCE_PAT }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish Pre-release to Marketplace
+        if: github.event.inputs.pre_release == 'true'
+        run: vsce publish --pre-release --packagePath ${{ steps.vsix.outputs.file }} -p ${{ secrets.VSCE_PAT }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-extension
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kotlin-debugger-jar
+          path: ./artifacts/
+
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vscode-extension
+          path: ./artifacts/
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release v${{ steps.get_version.outputs.VERSION }}
+          files: |
+            artifacts/*.jar
+            artifacts/*.vsix
+            release/kotlin-debugger.sh
+            release/kotlin-debugger.bat
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
