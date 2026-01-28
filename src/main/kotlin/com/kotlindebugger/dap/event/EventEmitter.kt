@@ -16,6 +16,7 @@ class EventEmitter(private val output: OutputStream) {
     private val json = Json { encodeDefaults = true }
 
     fun sendInitialized() {
+        Logger.info("Sending 'initialized' event to VSCode")
         send(DAPEvent(
             seq = seqCounter.getAndIncrement(),
             event = "initialized"
@@ -23,6 +24,7 @@ class EventEmitter(private val output: OutputStream) {
     }
 
     fun sendStopped(reason: String, threadId: Int, allThreadsStopped: Boolean = true, hitBreakpointIds: List<Int>? = null) {
+        Logger.info("Sending 'stopped' event: reason=$reason, threadId=$threadId, hitBreakpointIds=$hitBreakpointIds")
         send(DAPEvent(
             seq = seqCounter.getAndIncrement(),
             event = "stopped",
@@ -80,6 +82,10 @@ class EventEmitter(private val output: OutputStream) {
 
     private fun send(event: DAPEvent) {
         val jsonString = json.encodeToString(event)
+        Logger.debug("=== DAP Event ===")
+        Logger.debug("Event: ${event.event}")
+        Logger.debug("Seq: ${event.seq}")
+        Logger.debug("Body: $jsonString")
         val content = "Content-Length: ${jsonString.length}\r\n\r\n$jsonString"
         synchronized(output) {
             output.write(content.toByteArray())

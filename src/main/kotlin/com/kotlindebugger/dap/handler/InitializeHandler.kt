@@ -9,6 +9,8 @@ import kotlinx.serialization.json.Json
 
 class InitializeHandler : RequestHandler {
     override val command = "initialize"
+    
+    private val json = Json { encodeDefaults = true }
 
     override suspend fun handle(args: JsonObject?, session: DebugSession?): JsonElement {
         val capabilities = Capabilities(
@@ -22,6 +24,6 @@ class InitializeHandler : RequestHandler {
             supportsStepInTargetsRequest = false,
             supportsValueFormattingOptions = true
         )
-        return Json.encodeToJsonElement(capabilities)
+        return json.encodeToJsonElement(capabilities)
     }
 }

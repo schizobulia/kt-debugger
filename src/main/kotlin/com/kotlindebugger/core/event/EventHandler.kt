@@ -250,7 +250,7 @@ class EventHandler(private val vm: VirtualMachine) {
             is DebugEvent.StepCompleted -> true
             is DebugEvent.ExceptionThrown -> true
             is DebugEvent.VMStarted -> false  // VM 启动时保持暂停，让调用者决定何时 resume
-            is DebugEvent.ClassPrepared -> true // 类加载时保持暂停，以便设置断点
+            is DebugEvent.ClassPrepared -> false // 类加载时不暂停，DebugSession 会处理 resume
             else -> false
         }
     }

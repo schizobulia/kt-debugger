@@ -19,6 +19,27 @@ class BreakpointManager(
     private val eventHandler: EventHandler
 ) {
 
+    init {
+        // 在初始化时就设置全局 ClassPrepareRequest，监听所有类的加载
+        setupGlobalClassPrepareRequest()
+    }
+
+    /**
+     * 设置全局 ClassPrepareRequest
+     * 在 BreakpointManager 初始化时调用，确保能捕获所有类的加载事件
+     */
+    private fun setupGlobalClassPrepareRequest() {
+        try {
+            val request = vm.eventRequestManager().createClassPrepareRequest()
+            // 不添加 filter，监听所有类
+            request.setSuspendPolicy(com.sun.jdi.request.EventRequest.SUSPEND_EVENT_THREAD)
+            request.enable()
+            classPrepareRequests["*"] = request
+        } catch (e: Exception) {
+            // 忽略创建失败
+        }
+    }
+
     /**
      * 初始化内联断点支持（预留接口）
      */
@@ -203,11 +224,18 @@ class BreakpointManager(
         var found = false
 
         try {
-            for (refType in vm.allClasses()) {
+            val allClasses = vm.allClasses()
+            
+            for (refType in allClasses) {
                 try {
                     val sourceName = refType.sourceName()
-
-                    if (sourceName == file || sourceName?.endsWith("/$file") == true || file.endsWith(sourceName ?: "")) {
+                    
+                    // 检查是否匹配
+                    val matches = sourceName == file || 
+                                  sourceName?.endsWith("/$file") == true || 
+                                  file.endsWith(sourceName ?: "")
+                    
+                    if (matches) {
                         if (setBreakpointInClass(refType, line, breakpointId)) {
                             found = true
                         }
@@ -218,7 +246,6 @@ class BreakpointManager(
             }
         } catch (e: Exception) {
             // VM可能已经断开连接
-            System.err.println("Failed to access VM classes: ${e.message}")
         }
 
         return found
@@ -293,9 +320,7 @@ class BreakpointManager(
     private fun addPendingBreakpoint(file: String, breakpointId: Int, line: Int, condition: String?) {
         pendingBreakpoints.computeIfAbsent(file) { mutableListOf() }
             .add(PendingBreakpoint(breakpointId, line, condition))
-
-        // 添加类准备监听
-        addClassPrepareRequest("*")
+        // 全局 ClassPrepareRequest 已在初始化时设置，无需再次添加
     }
 
     /**

@@ -68,10 +68,12 @@ class SetBreakpointsHandler(private val server: DAPServer) : RequestHandler {
     }
 }
 
-class ConfigurationDoneHandler : RequestHandler {
+class ConfigurationDoneHandler(private val server: DAPServer) : RequestHandler {
     override val command = "configurationDone"
 
     override suspend fun handle(args: JsonObject?, session: DebugSession?): JsonElement? {
+        // 配置完成后恢复 VM 运行
+        server.getDebugSession()?.forceResume()
         return null
     }
 }

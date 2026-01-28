@@ -96,13 +96,17 @@ class AttachHandler(private val server: DAPServer) : RequestHandler {
     override val command = "attach"
 
     override suspend fun handle(args: JsonObject?, session: DebugSession?): JsonElement? {
+        Logger.info("Handling 'attach' command")
         val host = args?.get("host")?.jsonPrimitive?.content ?: "localhost"
         val port = args?.get("port")?.jsonPrimitive?.int
             ?: throw IllegalArgumentException("port is required")
 
+        Logger.info("Attaching to JVM at $host:$port")
+        
         // 解析源路径配置
         val sourcePaths = args["sourcePaths"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
         server.sourcePathResolver.setSourcePaths(sourcePaths)
+        Logger.debug("Source paths: $sourcePaths")
 
         val target = DebugTarget.Attach(host = host, port = port)
 
@@ -114,7 +118,9 @@ class AttachHandler(private val server: DAPServer) : RequestHandler {
             }
         })
 
+        Logger.info("Starting debug session...")
         debugSession.start()
+        Logger.info("Debug session started, sending 'initialized' event")
         server.eventEmitter.sendInitialized()
 
         return null

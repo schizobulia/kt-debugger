@@ -140,6 +140,20 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
     }
 
     /**
+     * 强制继续执行（跳过状态检查）
+     * 用于 configurationDone 后恢复 VM 运行
+     */
+    fun forceResume() {
+        try {
+            vm.resume()
+            state.set(SessionState.RUNNING)
+            currentThread = null
+        } catch (e: Exception) {
+            // 忽略 resume 错误
+        }
+    }
+
+    /**
      * 暂停执行
      */
     fun suspend() {
@@ -426,8 +440,7 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
                 if (refType != null) {
                     breakpointManager.onClassPrepared(event.className, refType)
                 }
-                // 不再自动 resume，让用户手动控制执行
-                // 避免在断点设置前程序就运行完成
+                // EventHandler 会自动 resume（shouldSuspend 返回 false）
             }
 
             else -> {}
