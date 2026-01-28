@@ -146,13 +146,13 @@ object SpecialClasses {
 
         // 遍历枚举
         println("All directions:")
-        for (d in Direction.values()) {        // 断点: 遍历枚举
+        for (d in Direction.entries) {        // 断点: 遍历枚举
             println("  ${d.ordinal}: ${d.name}")
         }
 
         // 带属性的枚举
         println("\nColors with properties:")
-        for (color in Color.values()) {
+        for (color in Color.entries) {
             println("  ${color.name}: ${color.displayName} (${color.toHex()})")
         }
 
@@ -160,7 +160,7 @@ object SpecialClasses {
         println("\nOperations:")
         val a = 10
         val b = 3
-        for (op in Operation.values()) {
+        for (op in Operation.entries) {
             val result = op.apply(a, b)        // 断点: 枚举方法调用
             println("  $a ${op.name} $b = $result")
         }

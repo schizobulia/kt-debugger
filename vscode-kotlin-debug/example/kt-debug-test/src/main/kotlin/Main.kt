@@ -39,31 +39,33 @@ fun main() {
     val scanner = Scanner(System.`in`)
     var running = true
 
-    while (running) {
-        printMainMenu()
-        print("\n请选择 (输入数字或命令): ")
+    try {
+        while (running) {
+            printMainMenu()
+            print("\n请选择 (输入数字或命令): ")
 
-        val input = scanner.nextLine().trim().lowercase()
+            val input = scanner.nextLine().trim().lowercase()
 
-        when {
-            input == "q" || input == "quit" || input == "exit" -> {
-                running = false
-                println("\n再见! Goodbye!")
+            when {
+                input == "q" || input == "quit" || input == "exit" -> {
+                    running = false
+                    println("\n再见! Goodbye!")
+                }
+                input == "all" -> runAllExamples()
+                input == "1" -> runBasicsMenu(scanner)
+                input == "2" -> runClassesMenu(scanner)
+                input == "3" -> runFunctionsMenu(scanner)
+                input == "4" -> runCollectionsMenu(scanner)
+                input == "5" -> runNullSafetyExamples()
+                input == "6" -> runAdvancedMenu(scanner)
+                input == "help" || input == "?" -> printHelp()
+                input.isEmpty() -> { /* 忽略空输入 */ }
+                else -> println("未知命令: $input，输入 'help' 查看帮助")
             }
-            input == "all" -> runAllExamples()
-            input == "1" -> runBasicsMenu(scanner)
-            input == "2" -> runClassesMenu(scanner)
-            input == "3" -> runFunctionsMenu(scanner)
-            input == "4" -> runCollectionsMenu(scanner)
-            input == "5" -> runNullSafetyExamples()
-            input == "6" -> runAdvancedMenu(scanner)
-            input == "help" || input == "?" -> printHelp()
-            input.isEmpty() -> { /* 忽略空输入 */ }
-            else -> println("未知命令: $input，输入 'help' 查看帮助")
         }
+    } finally {
+        scanner.close()
     }
-
-    scanner.close()
 }
 
 /**

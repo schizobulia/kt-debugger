@@ -68,11 +68,11 @@ fun List<Int>.sumOfSquares(): Int {
 /**
  * 可空类型的扩展函数
  */
-fun String?.orEmpty(): String {
+fun String?.toEmptyIfNull(): String {
     return this ?: ""                          // 断点: 可空扩展
 }
 
-fun String?.isNullOrBlank(): Boolean {
+fun String?.isNullOrBlankCustom(): Boolean {
     return this == null || this.isBlank()      // 断点: 空值检查
 }
 
@@ -165,12 +165,12 @@ object Extensions {
         val validString: String? = "Hello"
         val blankString: String? = "   "
 
-        println("null.orEmpty(): '${nullString.orEmpty()}'")      // 断点: 空值处理
-        println("validString.orEmpty(): '${validString.orEmpty()}'")
+        println("null.toEmptyIfNull(): '${nullString.toEmptyIfNull()}'")      // 断点: 空值处理
+        println("validString.toEmptyIfNull(): '${validString.toEmptyIfNull()}'")
 
-        println("null.isNullOrBlank(): ${nullString.isNullOrBlank()}")
-        println("validString.isNullOrBlank(): ${validString.isNullOrBlank()}")
-        println("blankString.isNullOrBlank(): ${blankString.isNullOrBlank()}")
+        println("null.isNullOrBlankCustom(): ${nullString.isNullOrBlankCustom()}")
+        println("validString.isNullOrBlankCustom(): ${validString.isNullOrBlankCustom()}")
+        println("blankString.isNullOrBlankCustom(): ${blankString.isNullOrBlankCustom()}")
     }
 
     /**
