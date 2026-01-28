@@ -6,8 +6,15 @@ on:
   pull_request:
     branches: [ main ]
 
+# Permissions required for PR check annotations and status updates
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 jobs:
   build:
+    name: Build and Test
     runs-on: ubuntu-latest
     
     steps:
@@ -28,7 +35,45 @@ jobs:
       run: ./gradlew build
 
     - name: Run tests
+      id: test
       run: ./gradlew test
+
+    - name: Publish Test Results
+      uses: dorny/test-reporter@v1
+      if: always()
+      with:
+        name: JUnit Test Results
+        path: 'build/test-results/test/*.xml'
+        reporter: java-junit
+        fail-on-error: true
+
+    - name: Generate Test Summary
+      if: always()
+      run: |
+        echo "## 🧪 Test Results Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ -d "build/test-results/test" ]; then
+          TOTAL=$(find build/test-results/test -name "*.xml" -exec grep -h "tests=" {} \; | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s}')
+          FAILURES=$(find build/test-results/test -name "*.xml" -exec grep -h "failures=" {} \; | sed 's/.*failures="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s}')
+          ERRORS=$(find build/test-results/test -name "*.xml" -exec grep -h "errors=" {} \; | sed 's/.*errors="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s}')
+          SKIPPED=$(find build/test-results/test -name "*.xml" -exec grep -h "skipped=" {} \; | sed 's/.*skipped="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s}')
+          
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ Total Tests | ${TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ❌ Failures | ${FAILURES:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⚠️ Errors | ${ERRORS:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⏭️ Skipped | ${SKIPPED:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${FAILURES:-0}" -eq 0 ] && [ "${ERRORS:-0}" -eq 0 ]; then
+            echo "### ✅ All tests passed!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Some tests failed. Please check the details above." >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "⚠️ No test results found." >> $GITHUB_STEP_SUMMARY
+        fi
 
     - name: Build Fat JAR
       run: ./gradlew fatJar
