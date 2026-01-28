@@ -98,7 +98,8 @@ class EventEmitterTest {
         val output = getOutput()
 
         // hitBreakpointIds should not be present when null
-        assertFalse(output.contains("\"hitBreakpointIds\"") && !output.contains("[]"))
+        // The output should NOT contain the hitBreakpointIds key
+        assertFalse(output.contains("hitBreakpointIds"))
     }
 
     @Test
@@ -106,8 +107,8 @@ class EventEmitterTest {
         emitter.sendStopped("breakpoint", 1, hitBreakpointIds = emptyList())
         val output = getOutput()
 
-        // Empty list should not add hitBreakpointIds field
-        assertFalse(output.contains("\"hitBreakpointIds\":[1"))
+        // Empty list should not add hitBreakpointIds field (implementation skips empty lists)
+        assertFalse(output.contains("hitBreakpointIds"))
     }
 
     // ==================== sendContinued Tests ====================
