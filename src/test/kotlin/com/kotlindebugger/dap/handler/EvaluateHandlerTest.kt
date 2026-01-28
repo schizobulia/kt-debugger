@@ -3,6 +3,7 @@ package com.kotlindebugger.dap.handler
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Nested
 import kotlinx.serialization.json.*
 
 /**
@@ -117,5 +118,152 @@ class EvaluateHandlerTest {
         assertEquals(result1, result2)
         assertEquals(result1.hashCode(), result2.hashCode())
         assertNotEquals(result1, result3)
+    }
+
+    @Nested
+    inner class EvaluationExceptionTests {
+        
+        @Test
+        fun `test exception with null message`() {
+            val exception = EvaluationException(message = "null reference")
+            assertNotNull(exception.message)
+        }
+
+        @Test
+        fun `test exception inherits from Exception`() {
+            val exception = EvaluationException("Test")
+            assertTrue(exception is Exception)
+        }
+
+        @Test
+        fun `test exception stacktrace is available`() {
+            val exception = EvaluationException("Test")
+            assertNotNull(exception.stackTrace)
+        }
+
+        @Test
+        fun `test nested exception cause chain`() {
+            val innerCause = IllegalArgumentException("inner")
+            val outerCause = RuntimeException("outer", innerCause)
+            val exception = EvaluationException("Evaluation failed", outerCause)
+            
+            assertEquals(outerCause, exception.cause)
+            assertEquals(innerCause, exception.cause?.cause)
+        }
+    }
+
+    @Nested
+    inner class EvaluationResultTests {
+        
+        @Test
+        fun `test result with array type`() {
+            val result = EvaluationResult(
+                displayValue = "int[5]",
+                typeName = "int[]",
+                variablesReference = 1005,
+                value = null
+            )
+            
+            assertEquals("int[5]", result.displayValue)
+            assertTrue(result.typeName.contains("[]"))
+        }
+
+        @Test
+        fun `test result with string value`() {
+            val result = EvaluationResult(
+                displayValue = "\"Hello World\"",
+                typeName = "java.lang.String",
+                variablesReference = 0,
+                value = null
+            )
+            
+            assertTrue(result.displayValue.startsWith("\""))
+            assertTrue(result.displayValue.endsWith("\""))
+        }
+
+        @Test
+        fun `test result with boolean value`() {
+            val result = EvaluationResult(
+                displayValue = "true",
+                typeName = "boolean",
+                variablesReference = 0,
+                value = null
+            )
+            
+            assertEquals("true", result.displayValue)
+            assertEquals("boolean", result.typeName)
+        }
+
+        @Test
+        fun `test result with object reference`() {
+            val result = EvaluationResult(
+                displayValue = "MyClass@12345",
+                typeName = "com.example.MyClass",
+                variablesReference = 1001,
+                value = null
+            )
+            
+            assertTrue(result.displayValue.contains("@"))
+            assertTrue(result.variablesReference > 0)
+        }
+
+        @Test
+        fun `test result with primitive types`() {
+            val intResult = EvaluationResult("42", "int", 0)
+            val longResult = EvaluationResult("123456789L", "long", 0)
+            val doubleResult = EvaluationResult("3.14", "double", 0)
+            val floatResult = EvaluationResult("2.5f", "float", 0)
+            val charResult = EvaluationResult("'a'", "char", 0)
+            
+            assertEquals(0, intResult.variablesReference)
+            assertEquals(0, longResult.variablesReference)
+            assertEquals(0, doubleResult.variablesReference)
+            assertEquals(0, floatResult.variablesReference)
+            assertEquals(0, charResult.variablesReference)
+        }
+
+        @Test
+        fun `test result component functions`() {
+            val result = EvaluationResult("value", "type", 1000, null)
+            
+            val (displayValue, typeName, variablesReference, value) = result
+            assertEquals("value", displayValue)
+            assertEquals("type", typeName)
+            assertEquals(1000, variablesReference)
+            assertNull(value)
+        }
+
+        @Test
+        fun `test result with complex nested type`() {
+            val result = EvaluationResult(
+                displayValue = "HashMap@1234",
+                typeName = "java.util.HashMap<java.lang.String, java.util.List<java.lang.Integer>>",
+                variablesReference = 2001,
+                value = null
+            )
+            
+            assertTrue(result.typeName.contains("HashMap"))
+            assertTrue(result.typeName.contains("<"))
+        }
+    }
+
+    @Test
+    fun `test EvaluationResult default value parameter`() {
+        val result = EvaluationResult("42", "int", 0)
+        assertNull(result.value)
+    }
+
+    @Test
+    fun `test EvaluationException with empty message`() {
+        val exception = EvaluationException("")
+        assertEquals("", exception.message)
+    }
+
+    @Test
+    fun `test EvaluationException with special characters`() {
+        val exception = EvaluationException("Error: \"value\" contains <special> chars & symbols")
+        assertTrue(exception.message!!.contains("\""))
+        assertTrue(exception.message!!.contains("<"))
+        assertTrue(exception.message!!.contains("&"))
     }
 }
