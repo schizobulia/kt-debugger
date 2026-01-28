@@ -1,434 +1,253 @@
-# Kotlin Debugger User Guide
-> The code and documentation for this project are AI generated.
+# Kotlin Debugger
 
-## Table of Contents
-1. [Introduction](#introduction)
-2. [Installation & Building](#installation--building)
-3. [Quick Start](#quick-start)
-4. [Command Reference](#command-reference)
-5. [Debugging Examples](#debugging-examples)
-6. [Advanced Features](#advanced-features)
-7. [Frequently Asked Questions](#frequently-asked-questions)
+<p align="center">
+  <img src="vscode-kotlin-debug/images/kotlin-debug-icon.png" alt="Kotlin Debugger" width="128">
+</p>
 
----
+<p align="center">
+  <strong>A standalone debugger for Kotlin/JVM programs</strong>
+</p>
 
-## Introduction
-The Kotlin Debugger is a standalone command-line debugger specifically designed for debugging Kotlin/JVM programs. It can run independently of IntelliJ IDEA and provides:
-
-- Breakpoint setting and management
-- Stack frame inspection and navigation
-- Variable viewing
-- Thread management
-- Kotlin feature support (inline functions, Lambdas, etc.)
-
-### System Requirements
-- JDK 11 or higher
-- Gradle 8.x (for building)
+<p align="center">
+  <a href="README_CN.md">中文文档</a> •
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#vscode-extension">VSCode Extension</a>
+</p>
 
 ---
 
-## Installation & Building
+## Features
 
-### 1. Build the Debugger
+- 🔍 **Standalone Debugger** - Works independently of IntelliJ IDEA
+- 🎯 **Breakpoint Management** - Set, enable, disable, and conditional breakpoints
+- 📚 **Stack Frame Navigation** - View and navigate call stacks
+- 🔎 **Variable Inspection** - Inspect local variables and object properties
+- 🧵 **Thread Management** - Switch between threads
+- 💡 **Expression Evaluation** - Evaluate expressions at breakpoints
+- 🔌 **DAP Protocol Support** - Integrates with VSCode and other DAP-compatible editors
+- ⚡ **Kotlin-Specific Features** - Inline functions, lambdas, data classes support
+
+## System Requirements
+
+- JDK 17 or higher
+- Gradle 8.x (for building from source)
+- Node.js 18+ (for VSCode extension development)
+
+## Installation
+
+### Option 1: Download Pre-built Release
+
+Download the latest release from [GitHub Releases](https://github.com/your-username/kt-debug/releases):
+
 ```bash
-cd kt-debugger
+# Download and extract
+wget https://github.com/your-username/kt-debug/releases/latest/download/kotlin-debugger-all.jar
 
-# Create Gradle Wrapper (if not exists)
-gradle wrapper --gradle-version 8.10
-
-# Build fat jar
-./gradlew fatJar
-
-# Check build output
-ls -la build/libs/kotlin-debugger-1.0-SNAPSHOT-all.jar
+# Run the debugger
+java -jar kotlin-debugger-all.jar
 ```
 
-### 2. Create Launch Script (Optional)
+### Option 2: Build from Source
+
 ```bash
-# Create a convenient launch script
-cat > kdb << 'EOF'
-#!/bin/bash
-java -jar kt-debugger/build/libs/kotlin-debugger-1.0-SNAPSHOT-all.jar "$@"
-EOF
-chmod +x kdb
-sudo mv kdb /usr/local/bin/
+# Clone the repository
+git clone https://github.com/your-username/kt-debug.git
+cd kt-debug
+
+# Build the debugger
+bash scripts/build.sh
+
+# The JAR file will be at: build/libs/kotlin-debugger-1.0-SNAPSHOT-all.jar
 ```
 
-Now you can start the debugger directly with the `kdb` command.
+### Option 3: Install VSCode Extension
 
----
+See [VSCode Extension](#vscode-extension) section below.
 
 ## Quick Start
 
-### Method 1: Attach Mode (Recommended)
-Start the target program first, then connect with the debugger.
+### 1. Start Your Kotlin Program with Debug Options
 
-#### Step 1: Launch Target Program with Debug Port
 ```bash
-# Start Java program with JDWP agent
-java '-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:5005' test-program/InteractiveTest.jar
+# Basic debug mode (program waits for debugger)
+java -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005 -jar your-app.jar
+
+# For Gradle projects
+./gradlew run --debug-jvm
 ```
 
-Parameter Explanation:
-- `transport=dt_socket`: Use socket communication
-- `server=y`: Act as a debug server
-- `suspend=y`: Pause after startup, wait for debugger connection
-- `address=*:5005`: Listen on port 5005 (allow all interfaces)
+### 2. Connect the Debugger
 
-#### Step 2: Start Debugger and Connect
+**Using CLI:**
 ```bash
-java -jar build/libs/kotlin-debugger-1.0-SNAPSHOT-all.jar
+java -jar kotlin-debugger-1.0-SNAPSHOT-all.jar
 
-# Connect in debugger
+# In the debugger console:
 (kdb) attach localhost:5005
+(kdb) break Main.kt:10
+(kdb) continue
 ```
 
-### Method 2: Launch Mode
-Let the debugger start the target program directly.
-```bash
-java -jar build/libs/kotlin-debugger-1.0-SNAPSHOT-all.jar
-
-# Launch program in debugger
-(kdb) run MainKt -cp /path/to/classes
+**Using VSCode:**
+1. Install the Kotlin Debug extension
+2. Create `.vscode/launch.json`:
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "kotlin",
+      "request": "attach",
+      "name": "Attach to Kotlin",
+      "host": "localhost",
+      "port": 5005,
+      "sourcePaths": ["${workspaceFolder}/src/main/kotlin"]
+    }
+  ]
+}
 ```
-
----
+3. Press `F5` to start debugging
 
 ## Command Reference
 
 ### Session Management
-| Command | Alias | Description | Example |
-|---------|-------|-------------|---------|
-| `run <class> [-cp path]` | `r` | Start program debugging | `run MainKt -cp app.jar` |
-| `attach <host>:<port>` | - | Connect to remote JVM | `attach localhost:5005` |
-| `quit` | `q` | Exit debugger | `quit` |
-| `help` | `h`, `?` | Show help information | `help` |
-| `status` | - | Show session status | `status` |
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `attach <host>:<port>` | - | Connect to remote JVM |
+| `run <class> [-cp path]` | `r` | Start program debugging |
+| `quit` | `q` | Exit debugger |
+| `help` | `h`, `?` | Show help |
+| `status` | - | Show session status |
 
 ### Breakpoint Management
-| Command | Alias | Description | Example |
-|---------|-------|-------------|---------|
-| `break <file>:<line>` | `b` | Set breakpoint | `b Main.kt:10` |
-| `delete <id>` | `d` | Delete breakpoint | `d 1` |
-| `list` | `l` | List all breakpoints | `list` |
-| `enable <id>` | - | Enable breakpoint | `enable 1` |
-| `disable <id>` | - | Disable breakpoint | `disable 1` |
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `break <file>:<line>` | `b` | Set breakpoint |
+| `break <file>:<line> if <cond>` | - | Set conditional breakpoint |
+| `delete <id>` | `d` | Delete breakpoint |
+| `list` | `l` | List all breakpoints |
+| `enable <id>` | - | Enable breakpoint |
+| `disable <id>` | - | Disable breakpoint |
 
 ### Execution Control
-| Command | Alias | Description | Example |
-|---------|-------|-------------|---------|
-| `continue` | `c` | Resume execution | `c` |
-| `step` | `s` | Step into (TODO) | `s` |
-| `next` | `n` | Step over (TODO) | `n` |
-| `finish` | `f` | Execute until return (TODO) | `f` |
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `continue` | `c` | Resume execution |
+| `step` | `s` | Step into |
+| `next` | `n` | Step over |
+| `finish` | `f` | Step out |
 
-### Stack Frame Navigation
-| Command | Alias | Description | Example |
-|---------|-------|-------------|---------|
-| `backtrace` | `bt`, `where` | Show call stack | `bt` |
-| `frame <n>` | `fr` | Switch to frame n | `fr 2` |
-| `up` | - | Move up one frame | `up` |
-| `down` | - | Move down one frame | `down` |
-
-### Variable Inspection
-| Command | Alias | Description | Example |
-|---------|-------|-------------|---------|
-| `locals` | - | Show local variables | `locals` |
-| `print <var>` | `p` | Print variable value | `p myVar` |
+### Stack & Variables
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `backtrace` | `bt`, `where` | Show call stack |
+| `frame <n>` | `fr` | Switch to frame n |
+| `up` / `down` | - | Navigate frames |
+| `locals` | - | Show local variables |
+| `print <expr>` | `p` | Print expression value |
 
 ### Thread Management
-| Command | Alias | Description | Example |
-|---------|-------|-------------|---------|
-| `threads` | - | List all threads | `threads` |
-| `thread <id>` | `t` | Switch to specified thread | `t 1` |
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `threads` | - | List all threads |
+| `thread <id>` | `t` | Switch to thread |
 
----
+## VSCode Extension
 
-## Debugging Examples
+The Kotlin Debug extension for VSCode provides a graphical debugging experience.
 
-### Example 1: Basic Debugging Workflow
-We'll use the built-in test program for demonstration.
+### Installation
 
-#### 1. Start Test Program (Debug Mode)
-Open Terminal 1:
+**From VSCode Marketplace:**
+1. Open VSCode
+2. Press `Ctrl+Shift+X` (or `Cmd+Shift+X` on Mac)
+3. Search for "Kotlin Debug"
+4. Click Install
+
+**From VSIX file:**
 ```bash
-cd kt-debugger/test-program
-./run-debug.sh
+# Build the extension
+bash scripts/vscode-ext.sh build
+
+# Install to VSCode
+bash scripts/vscode-ext.sh install
 ```
 
-Output:
-```
-Starting InteractiveTest with debug enabled on port 5005
-Use: attach localhost:5005
+### Features
 
-Listening for transport dt_socket at address: 5005
-```
+- Set breakpoints by clicking in the gutter
+- View variables in the Variables panel
+- Navigate call stacks
+- Evaluate expressions in Debug Console
+- Step through code with F10/F11
 
-#### 2. Start Debugger and Connect
-Open Terminal 2:
-```bash
-cd kt-debugger
-java -jar build/libs/kotlin-debugger-1.0-SNAPSHOT-all.jar
-```
-
-```
-╔═══════════════════════════════════════════╗
-║         Kotlin Debugger v1.0.0            ║
-║     Type 'help' for available commands    ║
-╚═══════════════════════════════════════════╝
-
-(kdb) attach localhost:5005
-Attached to localhost:5005
-```
-
-#### 3. Set Breakpoints
-```
-(kdb) b InteractiveTest.kt:65
-Breakpoint 1 set at InteractiveTest.kt:65
-
-(kdb) b InteractiveTest.kt:67
-Breakpoint 2 set at InteractiveTest.kt:67
-
-(kdb) list
-ID  Location                   Status   Condition
---  ------------------------   -------  ---------
-1   InteractiveTest.kt:65      enabled
-2   InteractiveTest.kt:67      enabled
-```
-
-#### 4. Resume Execution
-```
-(kdb) c
-Continuing...
-```
-
-The test program in Terminal 1 will start running and display a menu:
-```
-=== Kotlin Debug Test Program ===
-Commands: calc, list, random, inline, lambda, loop, quit
-
->
-```
-
-#### 5. Trigger Breakpoint
-Enter `calc` in Terminal 1 to trigger the breakpoint:
-
-Terminal 2 will show:
-```
-Hit breakpoint 1 at InteractiveTest.kt:65
-```
-
-#### 6. Inspect Stack Frames
-```
-(kdb) bt
-→ #0  InteractiveTestKt.testCalculation(InteractiveTest.kt:65)
-  #1  InteractiveTestKt.main(InteractiveTest.kt:22)
-  #2  InteractiveTestKt.main(InteractiveTest.kt)
-```
-
-#### 7. Inspect Variables
-```
-(kdb) locals
-Local Variables:
-  x: int = 42
-  y: int = 10
-
-(kdb) p x
-x: int = 42
-
-(kdb) p y
-y: int = 10
-```
-
-#### 8. Continue to Next Breakpoint
-```
-(kdb) c
-Continuing...
-Hit breakpoint 2 at InteractiveTest.kt:67
-
-(kdb) locals
-Local Variables:
-  x: int = 42
-  y: int = 10
-  sum: int = 52
-  product: int = 420
-```
-
-#### 9. Exit Debugging
-```
-(kdb) c
-Continuing...
-
-(kdb) quit
-Goodbye!
-```
-
----
-
-### Example 2: Debugging Loops
-```
-(kdb) attach localhost:5005
-Attached to localhost:5005
-
-(kdb) b InteractiveTest.kt:140
-Breakpoint 1 set at InteractiveTest.kt:140
-
-(kdb) c
-```
-
-Enter `loop` in the test program:
-```
-(kdb)
-Hit breakpoint 1 at InteractiveTest.kt:140
-
-(kdb) locals
-Local Variables:
-  sum: int = 0
-  i: int = 1
-
-(kdb) c
-Hit breakpoint 1 at InteractiveTest.kt:140
-
-(kdb) locals
-Local Variables:
-  sum: int = 1
-  i: int = 2
-
-(kdb) c
-Hit breakpoint 1 at InteractiveTest.kt:140
-
-(kdb) p sum
-sum: int = 3
-```
-
----
-
-### Example 3: Inspecting Threads
-```
-(kdb) threads
-ID   Name                  Status    State
---   ----                  ------    -----
-*1   main                  running   suspended
-2    Reference Handler     waiting   suspended
-3    Finalizer             waiting   suspended
-4    Signal Dispatcher     running   suspended
-```
-
-Switch threads:
-```
-(kdb) thread 1
-Switched to thread 1
-```
-
----
-
-## Advanced Features
-
-### Kotlin Feature Support
-
-#### Inline Function Debugging
-The debugger supports correct source code location display for inline functions via SMAP (Source Map):
-```kotlin
-inline fun inlineCalculate(a: Int, b: Int, operation: (Int, Int) -> Int): Int {
-    val result = operation(a, b)  // Breakpoint can be set here
-    return result
-}
-```
-
-When setting a breakpoint, use the source file and line number where the inline function is defined:
-```
-(kdb) b InteractiveTest.kt:98
-```
-
-#### Lambda Debugging
-Breakpoints can also be set inside Lambda expressions:
-```kotlin
-items.forEach { item ->
-    val upper = item.uppercase()  // Breakpoint can be set here
-    println("  $item -> $upper")
-}
-```
-
-### Breakpoint Location Formats
-| Location Type | Format | Example |
-|---------------|--------|---------|
-| File:Line | `file.kt:line` | `Main.kt:10` |
-| File Name Only | Auto-matching | `Main.kt:10` |
-| Full Path | Supported | `/path/to/Main.kt:10` |
-
----
-
-## Frequently Asked Questions
-
-### Q: Connection Failed "Connection refused"
-**Cause**: Target program not running or incorrect port
-
-**Solutions**:
-1. Verify the target program is running and listening on the specified port
-2. Check if the port number is correct
-3. Verify firewall settings are not blocking the connection
-
-### Q: Breakpoint Not Triggering
-**Cause**: Incorrect breakpoint location
-
-**Solutions**:
-1. Ensure the source file name is correct (case-sensitive)
-2. Confirm the line number contains executable code
-3. Use the `list` command to check breakpoint status
-
-### Q: Cannot See Variable Values
-**Cause**: Possible in optimized code
-
-**Solutions**:
-1. Ensure debug information is included during compilation (`-g` option)
-2. Verify the variable is in the current scope
-
-### Q: "No active debug session" Error
-**Cause**: Not connected to a target program
-
-**Solution**:
-```
-(kdb) attach localhost:5005
-# Or
-(kdb) run MainKt -cp your-app.jar
-```
-
----
+See [VSCode Extension README](vscode-kotlin-debug/README.md) for detailed usage.
 
 ## Project Structure
+
 ```
-kt-debugger/
-├── build.gradle.kts              # Gradle build configuration
-├── src/
-│   ├── main/kotlin/
-│   │   └── com/example/kotlindebugger/
-│   │       ├── Main.kt           # Entry point
-│   │       ├── cli/              # CLI interaction
-│   │       ├── core/             # Debugger core logic
-│   │       ├── common/           # Common utilities
-│   │       └── kotlin/           # Kotlin language support
-│   └── test/kotlin/              # Test code
-├── test-program/                 # Test application
-│   ├── InteractiveTest.kt        # Interactive test program
-│   ├── InteractiveTest.jar
-│   ├── run.sh                    # Run normally
-│   └── run-debug.sh              # Run in debug mode
-└── build/libs/
-    └── kotlin-debugger-1.0-SNAPSHOT-all.jar
+kt-debug/
+├── src/main/kotlin/          # Debugger core source code
+├── src/test/kotlin/          # Unit tests
+├── vscode-kotlin-debug/      # VSCode extension
+├── scripts/
+│   ├── build.sh              # Main build script
+│   └── vscode-ext.sh         # VSCode extension build script
+├── docs/                     # Documentation
+├── release/                  # Release artifacts
+└── test-program/             # Test programs
 ```
+
+## Development
+
+### Building
+
+```bash
+# Full build with tests
+bash scripts/build.sh
+
+# Skip tests
+bash scripts/build.sh -s
+
+# Build VSCode extension
+bash scripts/vscode-ext.sh build
+```
+
+### Running Tests
+
+```bash
+./gradlew test
+```
+
+### Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests
+5. Submit a pull request
+
+## Documentation
+
+- [Design Document](docs/DESIGN.md) - Architecture and design decisions
+- [Quick Reference](docs/QUICKREF.md) - Command quick reference
+- [Tutorial](docs/TUTORIAL.md) - Step-by-step tutorial
+- [DAP Integration](docs/DAP_INTEGRATION_PLAN.md) - DAP protocol implementation
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- [IntelliJ Community](https://github.com/JetBrains/intellij-community) - Reference implementation
+- [java-debug](https://github.com/microsoft/java-debug) - DAP protocol reference
+- [Kotlin](https://github.com/JetBrains/kotlin) - Kotlin compiler
 
 ---
 
-## Planned Features
-The following features are under development:
-- [ ] Step execution (step/next/finish)
-- [ ] Expression evaluation (eval)
-- [ ] Conditional breakpoints
-- [ ] Source code display
-- [ ] Coroutine debugging support
-- [ ] Inline stack frame display
-
----
-
-## Feedback & Contributions
-For issues or suggestions, please submit an Issue or Pull Request.
+<p align="center">
+  Made with ❤️ for Kotlin developers
+</p>

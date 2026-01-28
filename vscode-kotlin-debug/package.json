@@ -13,6 +13,7 @@
     "url": "https://github.com/your-username/kt-debug/issues"
   },
   "homepage": "https://github.com/your-username/kt-debug#readme",
+  "icon": "images/kotlin-debug-icon.png",
   "engines": {
     "vscode": "^1.80.0"
   },
