@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as cp from 'child_process';
 import * as os from 'os';
+import * as net from 'net';
 
 // 全局日志输出通道
 let logChannel: vscode.OutputChannel;
@@ -228,9 +229,6 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
                 launchedAppProcess.kill();
             }
 
-            // 确定是否使用 shell
-            const isWindows = process.platform === 'win32';
-            
             // 启动用户的应用程序
             launchedAppProcess = cp.spawn(command, [], {
                 cwd: cwd,
@@ -271,13 +269,36 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
             });
 
             // 等待应用程序启动并开始监听调试端口
-            logChannel.appendLine(`[Extension] Waiting ${preLaunchWait}ms for application to start...`);
-            await new Promise(resolve => setTimeout(resolve, preLaunchWait));
-
-            // 检查进程是否仍在运行
-            if (launchedAppProcess.exitCode !== null) {
-                vscode.window.showErrorMessage(`Application exited prematurely with code: ${launchedAppProcess.exitCode}`);
-                return false;
+            logChannel.appendLine(`[Extension] Waiting for application to start and open debug port ${config.port}...`);
+            
+            const port = config.port as number;
+            const host = config.host || 'localhost';
+            const maxWaitTime = preLaunchWait;
+            const checkInterval = 500;
+            const maxAttempts = Math.ceil(maxWaitTime / checkInterval);
+            
+            let portReady = false;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                // 检查进程是否仍在运行
+                if (!launchedAppProcess || launchedAppProcess.killed || launchedAppProcess.exitCode !== null) {
+                    const exitCode = launchedAppProcess?.exitCode ?? 'unknown';
+                    vscode.window.showErrorMessage(`Application exited prematurely with code: ${exitCode}`);
+                    return false;
+                }
+                
+                // 尝试连接到调试端口
+                const isPortOpen = await this.checkPort(host, port);
+                if (isPortOpen) {
+                    portReady = true;
+                    logChannel.appendLine(`[Extension] Debug port ${port} is now open`);
+                    break;
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, checkInterval));
+            }
+            
+            if (!portReady) {
+                logChannel.appendLine(`[Extension] Warning: Could not verify debug port ${port} is open, attempting to attach anyway...`);
             }
 
             logChannel.appendLine('[Extension] Application started, attaching debugger...');
@@ -301,6 +322,33 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
             return p.replace(/\$\{workspaceFolder\}/g, vscode.workspace.workspaceFolders[0].uri.fsPath);
         }
         return p;
+    }
+
+    /**
+     * 检查端口是否可连接
+     */
+    private checkPort(host: string, port: number): Promise<boolean> {
+        return new Promise((resolve) => {
+            const socket = new net.Socket();
+            socket.setTimeout(1000);
+            
+            socket.on('connect', () => {
+                socket.destroy();
+                resolve(true);
+            });
+            
+            socket.on('timeout', () => {
+                socket.destroy();
+                resolve(false);
+            });
+            
+            socket.on('error', () => {
+                socket.destroy();
+                resolve(false);
+            });
+            
+            socket.connect(port, host);
+        });
     }
 
     provideDebugConfigurations(
