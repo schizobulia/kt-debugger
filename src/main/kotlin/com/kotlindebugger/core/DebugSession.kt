@@ -3,6 +3,8 @@ package com.kotlindebugger.core
 import com.kotlindebugger.common.model.*
 import com.kotlindebugger.common.util.JdiUtils
 import com.kotlindebugger.core.breakpoint.BreakpointManager
+import com.kotlindebugger.core.breakpoint.ExceptionBreakpointManager
+import com.kotlindebugger.core.breakpoint.ExceptionBreakpointResult
 import com.kotlindebugger.core.event.DebugEventListener
 import com.kotlindebugger.core.event.EventHandler
 import com.kotlindebugger.core.jdi.DebugTarget
@@ -40,6 +42,7 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
 
     private lateinit var eventHandler: EventHandler
     private lateinit var breakpointManager: BreakpointManager
+    private lateinit var exceptionBreakpointManager: ExceptionBreakpointManager
     private lateinit var stackFrameManager: StackFrameManager
     private lateinit var steppingController: SteppingController
     private lateinit var variableInspector: VariableInspector
@@ -75,6 +78,7 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
         positionManager = KotlinPositionManager(vm, smapCache)
         sourceViewer = SourceViewer() // TODO: 可以从配置中读取源代码根目录
         breakpointManager = BreakpointManager(vm, eventHandler)
+        exceptionBreakpointManager = ExceptionBreakpointManager(vm)
         stackFrameManager = StackFrameManager(vm)
         steppingController = SteppingController(vm, eventHandler, positionManager)
         variableInspector = VariableInspector(vm)
@@ -102,6 +106,14 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
         try {
             if (::breakpointManager.isInitialized) {
                 breakpointManager.clear()
+            }
+        } catch (e: Exception) {
+            // 忽略清理时的错误
+        }
+
+        try {
+            if (::exceptionBreakpointManager.isInitialized) {
+                exceptionBreakpointManager.clearExceptionRequests()
             }
         } catch (e: Exception) {
             // 忽略清理时的错误
@@ -204,6 +216,31 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
      */
     fun disableBreakpoint(id: Int): Boolean {
         return breakpointManager.disableBreakpoint(id)
+    }
+
+    // ==================== 异常断点管理 ====================
+
+    /**
+     * 设置异常断点
+     * @param filters 过滤器列表，如 ["caught", "uncaught"]
+     * @return 设置的断点结果列表
+     */
+    fun setExceptionBreakpoints(filters: List<String>): List<ExceptionBreakpointResult> {
+        return exceptionBreakpointManager.setExceptionBreakpoints(filters)
+    }
+
+    /**
+     * 检查是否启用了异常断点
+     */
+    fun isExceptionBreakpointsEnabled(): Boolean {
+        return exceptionBreakpointManager.isEnabled()
+    }
+
+    /**
+     * 检查是否应该在此异常处暂停
+     */
+    fun shouldStopOnException(isCaught: Boolean): Boolean {
+        return exceptionBreakpointManager.shouldStopOnException(isCaught)
     }
 
     // ==================== 栈帧管理 ====================
@@ -425,6 +462,12 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
             }
 
             is DebugEvent.StepCompleted -> {
+                state.set(SessionState.SUSPENDED)
+                currentThread = vm.allThreads().find { it.uniqueID() == event.threadId }
+                currentFrameIndex = 0
+            }
+
+            is DebugEvent.ExceptionThrown -> {
                 state.set(SessionState.SUSPENDED)
                 currentThread = vm.allThreads().find { it.uniqueID() == event.threadId }
                 currentFrameIndex = 0

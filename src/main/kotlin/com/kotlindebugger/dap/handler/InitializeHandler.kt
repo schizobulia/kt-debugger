@@ -2,6 +2,7 @@ package com.kotlindebugger.dap.handler
 
 import com.kotlindebugger.core.DebugSession
 import com.kotlindebugger.dap.protocol.Capabilities
+import com.kotlindebugger.dap.protocol.ExceptionBreakpointsFilter
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.encodeToJsonElement
@@ -22,7 +23,22 @@ class InitializeHandler : RequestHandler {
             supportsSetVariable = true,
             supportsRestartFrame = false,
             supportsStepInTargetsRequest = false,
-            supportsValueFormattingOptions = true
+            supportsValueFormattingOptions = true,
+            supportsExceptionInfoRequest = true,
+            exceptionBreakpointFilters = listOf(
+                ExceptionBreakpointsFilter(
+                    filter = "caught",
+                    label = "Caught Exceptions",
+                    default = false,
+                    description = "Break on caught exceptions"
+                ),
+                ExceptionBreakpointsFilter(
+                    filter = "uncaught",
+                    label = "Uncaught Exceptions",
+                    default = true,
+                    description = "Break on uncaught exceptions"
+                )
+            )
         )
         return json.encodeToJsonElement(capabilities)
     }

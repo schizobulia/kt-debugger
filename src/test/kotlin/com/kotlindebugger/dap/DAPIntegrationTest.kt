@@ -58,8 +58,11 @@ class DAPIntegrationTest {
     // ==================== Breakpoint Handler Tests ====================
 
     @Test
-    fun `test setExceptionBreakpoints returns empty breakpoints`() = runBlocking {
-        val handler = SetExceptionBreakpointsHandler()
+    fun `test setExceptionBreakpoints returns breakpoints`() = runBlocking {
+        val input = ByteArrayInputStream(ByteArray(0))
+        val output = ByteArrayOutputStream()
+        val server = DAPServer(input, output)
+        val handler = SetExceptionBreakpointsHandler(server)
         val args = buildJsonObject {
             putJsonArray("filters") {
                 add("uncaught")
@@ -77,9 +80,12 @@ class DAPIntegrationTest {
 
     @Test
     fun `test request dispatcher routes to correct handler`() = runBlocking {
+        val input = ByteArrayInputStream(ByteArray(0))
+        val output = ByteArrayOutputStream()
+        val server = DAPServer(input, output)
         val dispatcher = RequestDispatcher()
         dispatcher.register(InitializeHandler())
-        dispatcher.register(SetExceptionBreakpointsHandler())
+        dispatcher.register(SetExceptionBreakpointsHandler(server))
         
         // Test initialize
         val initResult = dispatcher.dispatch("initialize", null, null)
@@ -232,9 +238,12 @@ class DAPIntegrationTest {
 
     @Test
     fun `test complete DAP initialization sequence`() = runBlocking {
+        val input = ByteArrayInputStream(ByteArray(0))
+        val output = ByteArrayOutputStream()
+        val server = DAPServer(input, output)
         val dispatcher = RequestDispatcher()
         dispatcher.register(InitializeHandler())
-        dispatcher.register(SetExceptionBreakpointsHandler())
+        dispatcher.register(SetExceptionBreakpointsHandler(server))
         
         // Step 1: Initialize
         val initArgs = buildJsonObject {

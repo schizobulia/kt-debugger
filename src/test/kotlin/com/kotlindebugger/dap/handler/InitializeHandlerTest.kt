@@ -138,4 +138,20 @@ class InitializeHandlerTest {
         // Both calls should return equivalent results
         assertEquals(result1.toString(), result2.toString())
     }
+
+    @Test
+    fun `test capabilities includes exceptionBreakpointFilters`() = runBlocking {
+        val result = handler.handle(null, null)
+        val resultStr = result.toString()
+        assertTrue(resultStr.contains("exceptionBreakpointFilters"))
+        assertTrue(resultStr.contains("caught"))
+        assertTrue(resultStr.contains("uncaught"))
+    }
+
+    @Test
+    fun `test capabilities includes supportsExceptionInfoRequest`() = runBlocking {
+        val result = handler.handle(null, null)
+        val resultStr = result.toString()
+        assertTrue(resultStr.contains("supportsExceptionInfoRequest"))
+    }
 }

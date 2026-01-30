@@ -198,6 +198,20 @@
               ]
             }
           }
+        ],
+        "exceptionBreakpointFilters": [
+          {
+            "filter": "caught",
+            "label": "Caught Exceptions",
+            "default": false,
+            "description": "Break on caught exceptions"
+          },
+          {
+            "filter": "uncaught",
+            "label": "Uncaught Exceptions",
+            "default": true,
+            "description": "Break on uncaught exceptions"
+          }
         ]
       }
     ]

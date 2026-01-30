@@ -23,8 +23,8 @@ class EventEmitter(private val output: OutputStream) {
         ))
     }
 
-    fun sendStopped(reason: String, threadId: Int, allThreadsStopped: Boolean = true, hitBreakpointIds: List<Int>? = null) {
-        Logger.info("Sending 'stopped' event: reason=$reason, threadId=$threadId, hitBreakpointIds=$hitBreakpointIds")
+    fun sendStopped(reason: String, threadId: Int, allThreadsStopped: Boolean = true, hitBreakpointIds: List<Int>? = null, description: String? = null, text: String? = null) {
+        Logger.info("Sending 'stopped' event: reason=$reason, threadId=$threadId, hitBreakpointIds=$hitBreakpointIds, description=$description")
         send(DAPEvent(
             seq = seqCounter.getAndIncrement(),
             event = "stopped",
@@ -36,6 +36,12 @@ class EventEmitter(private val output: OutputStream) {
                     putJsonArray("hitBreakpointIds") {
                         hitBreakpointIds.forEach { add(JsonPrimitive(it)) }
                     }
+                }
+                if (description != null) {
+                    put("description", description)
+                }
+                if (text != null) {
+                    put("text", text)
                 }
             }
         ))
