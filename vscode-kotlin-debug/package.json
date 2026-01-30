@@ -66,6 +66,10 @@
         },
         {
           "command": "kotlin-debug.showDebugMenu"
+        },
+        {
+          "command": "kotlin-debug.debugMain",
+          "when": "false"
         }
       ]
     },

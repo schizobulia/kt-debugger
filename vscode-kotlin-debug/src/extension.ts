@@ -307,11 +307,30 @@ async function addOrUpdateLaunchConfiguration(config: vscode.DebugConfiguration)
     if (fs.existsSync(launchJsonPath)) {
         try {
             const content = fs.readFileSync(launchJsonPath, 'utf-8');
-            // 移除可能的注释
-            const jsonContent = content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-            launchJson = JSON.parse(jsonContent);
-        } catch {
-            launchJson = { version: '0.2.0', configurations: [] };
+            // Try to parse JSON (VSCode launch.json supports comments via JSON with Comments)
+            // Use a simple approach - try parsing directly first
+            launchJson = JSON.parse(content);
+        } catch (e) {
+            // If direct parsing fails, try removing simple comments
+            try {
+                const content = fs.readFileSync(launchJsonPath, 'utf-8');
+                // Remove single-line comments and multi-line comments more carefully
+                const lines = content.split('\n');
+                const cleanedLines = lines.map(line => {
+                    // Only remove comments that start at the beginning of a line (after whitespace)
+                    const trimmed = line.trim();
+                    if (trimmed.startsWith('//')) {
+                        return '';
+                    }
+                    return line;
+                });
+                const cleanedContent = cleanedLines.join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+                launchJson = JSON.parse(cleanedContent);
+            } catch {
+                logChannel.appendLine(`[Extension] Warning: Could not parse existing launch.json. Creating new configuration.`);
+                vscode.window.showWarningMessage('Could not parse existing launch.json. A new configuration will be added.');
+                launchJson = { version: '0.2.0', configurations: [] };
+            }
         }
     } else {
         launchJson = { version: '0.2.0', configurations: [] };
@@ -1058,8 +1077,12 @@ class KotlinDebugHoverProvider implements vscode.HoverProvider {
                 }
                 return new vscode.Hover(markdown, wordRange);
             }
-        } catch {
-            // 表达式求值失败，返回 undefined
+        } catch (e) {
+            // Expression evaluation failed - this is normal for non-evaluable expressions
+            // Only log if it's an unexpected error type
+            if (e instanceof Error && !e.message.includes('not available') && !e.message.includes('not found')) {
+                logChannel.appendLine(`[Extension] Hover evaluation failed for '${word}': ${e.message}`);
+            }
         }
 
         return undefined;
