@@ -112,6 +112,14 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
         }
 
         try {
+            if (::exceptionBreakpointManager.isInitialized) {
+                exceptionBreakpointManager.clearExceptionRequests()
+            }
+        } catch (e: Exception) {
+            // 忽略清理时的错误
+        }
+
+        try {
             if (::eventHandler.isInitialized) {
                 eventHandler.stop()
             }

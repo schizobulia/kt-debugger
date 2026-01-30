@@ -31,14 +31,23 @@ class ExceptionBreakpointManager(private val vm: VirtualMachine) {
         // 清除现有的异常请求
         clearExceptionRequests()
 
+        // 如果没有过滤器，返回空列表
+        if (filters.isEmpty()) {
+            return emptyList()
+        }
+
+        // 检查有效的过滤器
+        val validFilters = listOf("caught", "uncaught")
+        val recognizedFilters = filters.filter { it in validFilters }
+        
         // 更新设置
         catchCaught = filters.contains("caught")
         catchUncaught = filters.contains("uncaught")
 
         val results = mutableListOf<ExceptionBreakpointResult>()
 
-        // 如果需要捕获异常，创建异常请求
-        if (catchCaught || catchUncaught) {
+        // 如果有至少一个有效过滤器，创建异常请求
+        if (recognizedFilters.isNotEmpty() && (catchCaught || catchUncaught)) {
             try {
                 // 创建一个全局异常请求，捕获所有异常
                 val request = vm.eventRequestManager().createExceptionRequest(
@@ -52,12 +61,20 @@ class ExceptionBreakpointManager(private val vm: VirtualMachine) {
                 exceptionRequests["all"] = request
                 Logger.debug("Created exception request: caught=$catchCaught, uncaught=$catchUncaught")
 
-                // 为每个过滤器返回一个成功的断点
+                // 为每个请求的过滤器返回结果
                 for (filter in filters) {
-                    results.add(ExceptionBreakpointResult(
-                        verified = true,
-                        message = null
-                    ))
+                    if (filter in validFilters) {
+                        results.add(ExceptionBreakpointResult(
+                            verified = true,
+                            message = null
+                        ))
+                    } else {
+                        // 无法识别的过滤器
+                        results.add(ExceptionBreakpointResult(
+                            verified = false,
+                            message = "Unknown exception filter: $filter"
+                        ))
+                    }
                 }
             } catch (e: Exception) {
                 Logger.error("Failed to create exception request", e)
@@ -66,6 +83,21 @@ class ExceptionBreakpointManager(private val vm: VirtualMachine) {
                     results.add(ExceptionBreakpointResult(
                         verified = false,
                         message = "Failed to set exception breakpoint: ${e.message}"
+                    ))
+                }
+            }
+        } else {
+            // 所有过滤器都不被识别
+            for (filter in filters) {
+                if (filter in validFilters) {
+                    results.add(ExceptionBreakpointResult(
+                        verified = true,
+                        message = null
+                    ))
+                } else {
+                    results.add(ExceptionBreakpointResult(
+                        verified = false,
+                        message = "Unknown exception filter: $filter"
                     ))
                 }
             }
