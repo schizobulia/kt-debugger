@@ -561,6 +561,11 @@ class ExpressionEvaluator(
             null
         }
         
+        // Handle safe call: if receiver is null and this is a safe call, return null
+        if (receiver == null && node.receiver != null && node.safe) {
+            return null
+        }
+        
         val args = node.arguments.map { evaluateNode(it) }
         
         return when {

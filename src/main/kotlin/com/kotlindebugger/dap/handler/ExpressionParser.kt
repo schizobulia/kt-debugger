@@ -244,10 +244,11 @@ class Lexer(private val input: String) {
             pos++
         }
         
-        if (pos < length) {
-            pos++ // skip closing quote
+        if (pos >= length) {
+            throw EvaluationException("Unterminated string literal starting at position $startPos")
         }
         
+        pos++ // skip closing quote
         return Token(TokenType.STRING, sb.toString(), startPos)
     }
     
@@ -255,7 +256,11 @@ class Lexer(private val input: String) {
         val startPos = pos
         pos++ // skip opening quote
         
-        val ch = if (pos < length && input[pos] == '\\' && pos + 1 < length) {
+        if (pos >= length) {
+            throw EvaluationException("Unterminated character literal starting at position $startPos")
+        }
+        
+        val ch = if (input[pos] == '\\' && pos + 1 < length) {
             pos++
             when (input[pos]) {
                 'n' -> '\n'
@@ -265,17 +270,16 @@ class Lexer(private val input: String) {
                 '\'' -> '\''
                 else -> input[pos]
             }
-        } else if (pos < length) {
-            input[pos]
         } else {
-            ' '
+            input[pos]
         }
         pos++
         
-        if (pos < length && input[pos] == '\'') {
-            pos++ // skip closing quote
+        if (pos >= length || input[pos] != '\'') {
+            throw EvaluationException("Unterminated character literal starting at position $startPos")
         }
         
+        pos++ // skip closing quote
         return Token(TokenType.CHAR, ch, startPos)
     }
     
@@ -331,7 +335,7 @@ class Lexer(private val input: String) {
                         pos += 2
                         Token(TokenType.NE, "!=", startPos)
                     }
-                    pos + 2 < length && input.substring(pos, pos + 3) == "!is" -> {
+                    pos + 3 <= length && input.substring(pos, pos + 3) == "!is" -> {
                         pos += 3
                         Token(TokenType.IS, "!is", startPos)
                     }
@@ -426,8 +430,12 @@ data class ArrayAccessNode(val array: ExprNode, val index: ExprNode) : ExprNode(
 
 /**
  * 方法调用节点
+ * @param receiver The object on which the method is called, or null for local method calls
+ * @param methodName The name of the method
+ * @param arguments The list of argument expressions
+ * @param safe If true, this is a safe call (?.) that returns null if receiver is null
  */
-data class MethodCallNode(val receiver: ExprNode?, val methodName: String, val arguments: List<ExprNode>) : ExprNode()
+data class MethodCallNode(val receiver: ExprNode?, val methodName: String, val arguments: List<ExprNode>, val safe: Boolean = false) : ExprNode()
 
 /**
  * 类型检查节点 (is, !is)
@@ -641,7 +649,7 @@ class ExpressionParser(private val tokens: List<Token>) {
                     val name = expectIdentifier()
                     if (check(TokenType.LPAREN)) {
                         val args = parseArguments()
-                        MethodCallNode(expr, name, args)
+                        MethodCallNode(expr, name, args, safe = false)
                     } else {
                         MemberAccessNode(expr, name, safe = false)
                     }
@@ -650,7 +658,7 @@ class ExpressionParser(private val tokens: List<Token>) {
                     val name = expectIdentifier()
                     if (check(TokenType.LPAREN)) {
                         val args = parseArguments()
-                        MethodCallNode(expr, name, args) // TODO: handle safe call for methods
+                        MethodCallNode(expr, name, args, safe = true)
                     } else {
                         MemberAccessNode(expr, name, safe = true)
                     }
