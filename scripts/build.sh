@@ -285,6 +285,44 @@ if [ -d "test-program" ]; then
     fi
 fi
 
+# 构建 vscode-kotlin-debug/example/kt-debug-test 项目
+KT_DEBUG_TEST_DIR="$PROJECT_ROOT/vscode-kotlin-debug/example/kt-debug-test"
+if [ -d "$KT_DEBUG_TEST_DIR" ]; then
+    print_info "检测到 kt-debug-test 项目目录，准备打包..."
+
+    # 进入 kt-debug-test 目录
+    cd "$KT_DEBUG_TEST_DIR"
+
+    # 删除原有的构建目录，避免缓存问题
+    print_info "清理 kt-debug-test 项目的旧构建文件..."
+    rm -rf build/
+
+    # 检查并设置 gradlew 执行权限
+    if [ -f "./gradlew" ]; then
+        chmod +x ./gradlew
+
+        print_info "构建 kt-debug-test 项目..."
+        if ./gradlew build jar; then
+            print_success "kt-debug-test 项目构建成功"
+            
+            # 显示生成的 JAR 文件
+            KT_DEBUG_JAR=$(find build/libs -name "*.jar" -type f 2>/dev/null | head -n 1)
+            if [ -n "$KT_DEBUG_JAR" ]; then
+                print_success "生成的 JAR 文件: $KT_DEBUG_JAR"
+            fi
+        else
+            print_error "kt-debug-test 项目构建失败"
+        fi
+    else
+        print_warning "kt-debug-test 项目未找到 gradlew，跳过构建"
+    fi
+
+    # 返回项目根目录
+    cd "$PROJECT_ROOT"
+else
+    print_warning "未找到 kt-debug-test 项目目录: $KT_DEBUG_TEST_DIR"
+fi
+
 # 提示 VSCode 扩展构建
 echo ""
 print_info "如需构建 VSCode 扩展，请运行:"
