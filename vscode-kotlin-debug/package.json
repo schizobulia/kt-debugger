@@ -2,7 +2,7 @@
   "name": "kotlin-debug",
   "displayName": "Kotlin Debug",
   "description": "Kotlin debugger for VSCode using kotlin-debugger DAP",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "kotlindebugger",
   "license": "MIT",
   "repository": {
@@ -30,10 +30,45 @@
   "activationEvents": [
     "onDebug",
     "onDebugResolve:kotlin",
-    "onDebugDynamicConfigurations:kotlin"
+    "onDebugDynamicConfigurations:kotlin",
+    "onLanguage:kotlin"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "kotlin-debug.generateLaunchConfig",
+        "title": "Kotlin Debug: Generate Launch Configuration",
+        "category": "Kotlin Debug"
+      },
+      {
+        "command": "kotlin-debug.debugMain",
+        "title": "Kotlin Debug: Debug Main Function",
+        "category": "Kotlin Debug"
+      },
+      {
+        "command": "kotlin-debug.showDebugMenu",
+        "title": "Kotlin Debug: Show Debug Menu",
+        "category": "Kotlin Debug"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "kotlin-debug.generateLaunchConfig",
+          "when": "resourceLangId == kotlin",
+          "group": "debug"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "kotlin-debug.generateLaunchConfig"
+        },
+        {
+          "command": "kotlin-debug.showDebugMenu"
+        }
+      ]
+    },
     "configuration": {
       "title": "Kotlin Debug",
       "properties": {
@@ -41,6 +76,27 @@
           "type": "string",
           "default": "",
           "description": "Path to the kotlin-debugger JAR file. If not set, the extension will search in common locations."
+        },
+        "kotlin-debug.enableCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Code Lens for Kotlin main functions to show Run/Debug actions."
+        },
+        "kotlin-debug.enableHoverEvaluation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable hover evaluation of variables during debugging."
+        },
+        "kotlin-debug.defaultSourcePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "${workspaceFolder}/src/main/kotlin",
+            "${workspaceFolder}/src/main/java"
+          ],
+          "description": "Default source paths to use for resolving Kotlin files during debugging."
         }
       }
     },
