@@ -74,6 +74,15 @@ class LaunchHandler(private val server: DAPServer) : RequestHandler {
                 Logger.info("Step completed on thread ${event.threadId}")
                 server.eventEmitter.sendStopped("step", event.threadId.toInt())
             }
+            is DebugEvent.ExceptionThrown -> {
+                Logger.info("Exception thrown: ${event.exceptionClass} on thread ${event.threadId}")
+                server.eventEmitter.sendStopped(
+                    reason = "exception",
+                    threadId = event.threadId.toInt(),
+                    description = "${event.exceptionClass}: ${event.message ?: ""}",
+                    text = event.exceptionClass
+                )
+            }
             is DebugEvent.VMDeath -> {
                 Logger.info("VM death event received")
                 server.eventEmitter.sendExited(0)
@@ -139,6 +148,15 @@ class AttachHandler(private val server: DAPServer) : RequestHandler {
             is DebugEvent.StepCompleted -> {
                 Logger.info("Step completed on thread ${event.threadId}")
                 server.eventEmitter.sendStopped("step", event.threadId.toInt())
+            }
+            is DebugEvent.ExceptionThrown -> {
+                Logger.info("Exception thrown: ${event.exceptionClass} on thread ${event.threadId}")
+                server.eventEmitter.sendStopped(
+                    reason = "exception",
+                    threadId = event.threadId.toInt(),
+                    description = "${event.exceptionClass}: ${event.message ?: ""}",
+                    text = event.exceptionClass
+                )
             }
             is DebugEvent.VMDeath -> {
                 Logger.info("VM death event received")

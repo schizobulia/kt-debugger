@@ -65,6 +65,17 @@ data class Variable(
 )
 
 @Serializable
+data class ExceptionBreakpointsFilter(
+    val filter: String,
+    val label: String,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault
+    val default: Boolean = false,
+    val description: String? = null,
+    val supportsCondition: Boolean? = null
+)
+
+@Serializable
 data class Capabilities(
     val supportsConfigurationDoneRequest: Boolean = true,
     val supportsFunctionBreakpoints: Boolean = false,
@@ -74,5 +85,7 @@ data class Capabilities(
     val supportsSetVariable: Boolean = true,
     val supportsRestartFrame: Boolean = false,
     val supportsStepInTargetsRequest: Boolean = false,
-    val supportsValueFormattingOptions: Boolean = true
+    val supportsValueFormattingOptions: Boolean = true,
+    val supportsExceptionInfoRequest: Boolean = false,
+    val exceptionBreakpointFilters: List<ExceptionBreakpointsFilter>? = null
 )

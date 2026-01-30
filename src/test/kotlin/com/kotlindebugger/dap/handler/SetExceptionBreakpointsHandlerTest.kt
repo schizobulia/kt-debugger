@@ -1,5 +1,6 @@
 package com.kotlindebugger.dap.handler
 
+import com.kotlindebugger.dap.DAPServer
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -9,6 +10,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 
 /**
  * SetExceptionBreakpointsHandler 单元测试
@@ -16,11 +19,16 @@ import org.junit.jupiter.api.BeforeEach
 class SetExceptionBreakpointsHandlerTest {
 
     private lateinit var handler: SetExceptionBreakpointsHandler
+    private lateinit var server: DAPServer
     private val json = Json { ignoreUnknownKeys = true }
 
     @BeforeEach
     fun setup() {
-        handler = SetExceptionBreakpointsHandler()
+        // 创建一个用于测试的 DAPServer
+        val input = ByteArrayInputStream(ByteArray(0))
+        val output = ByteArrayOutputStream()
+        server = DAPServer(input, output)
+        handler = SetExceptionBreakpointsHandler(server)
     }
 
     @Test
@@ -29,12 +37,13 @@ class SetExceptionBreakpointsHandlerTest {
     }
 
     @Test
-    fun `test handler returns empty breakpoints list`() = runBlocking {
+    fun `test handler returns empty breakpoints list when no filters provided`() = runBlocking {
         val result = handler.handle(null, null)
         assertNotNull(result)
         
         val resultStr = result.toString()
         assertTrue(resultStr.contains("\"breakpoints\""))
+        // No filters means empty list
         assertTrue(resultStr.contains("[]"))
     }
 
@@ -49,9 +58,10 @@ class SetExceptionBreakpointsHandlerTest {
         val result = handler.handle(args, null)
         assertNotNull(result)
         
-        // Handler should still return empty breakpoints list (not yet implemented)
+        // Handler returns breakpoints with verified=true when no session
         val resultStr = result.toString()
         assertTrue(resultStr.contains("\"breakpoints\""))
+        assertTrue(resultStr.contains("\"verified\""))
     }
 
     @Test

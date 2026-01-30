@@ -38,7 +38,7 @@ class DAPServer(
         dispatcher.register(LaunchHandler(this))
         dispatcher.register(AttachHandler(this))
         dispatcher.register(SetBreakpointsHandler(this))
-        dispatcher.register(SetExceptionBreakpointsHandler())
+        dispatcher.register(SetExceptionBreakpointsHandler(this))
         dispatcher.register(ConfigurationDoneHandler(this))
         dispatcher.register(ThreadsHandler(this))
         dispatcher.register(StackTraceHandler(this))
