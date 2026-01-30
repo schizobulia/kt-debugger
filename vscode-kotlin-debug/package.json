@@ -57,6 +57,52 @@
           "kotlin"
         ],
         "configurationAttributes": {
+          "launch": {
+            "required": [
+              "command",
+              "port"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "Command to start the application. Must include JDWP debug options with the specified port."
+              },
+              "port": {
+                "type": "number",
+                "description": "Debug port that the application will listen on"
+              },
+              "host": {
+                "type": "string",
+                "description": "Host to connect to (for remote debugging)",
+                "default": "localhost"
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory for the command",
+                "default": "${workspaceFolder}"
+              },
+              "env": {
+                "type": "object",
+                "description": "Environment variables for the command",
+                "default": {}
+              },
+              "sourcePaths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Source paths for Kotlin files",
+                "default": [
+                  "${workspaceFolder}/src/main/kotlin"
+                ]
+              },
+              "preLaunchWait": {
+                "type": "number",
+                "description": "Time in milliseconds to wait after starting the command before attaching (default: 2000)",
+                "default": 2000
+              }
+            }
+          },
           "attach": {
             "required": [
               "port"
@@ -87,6 +133,17 @@
         "initialConfigurations": [
           {
             "type": "kotlin",
+            "request": "launch",
+            "name": "Kotlin: Launch and Debug",
+            "command": "java -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005 -jar ${workspaceFolder}/build/libs/your-app.jar",
+            "port": 5005,
+            "cwd": "${workspaceFolder}",
+            "sourcePaths": [
+              "${workspaceFolder}/src/main/kotlin"
+            ]
+          },
+          {
+            "type": "kotlin",
             "request": "attach",
             "name": "Kotlin: Attach to JVM",
             "host": "localhost",
@@ -97,6 +154,36 @@
           }
         ],
         "configurationSnippets": [
+          {
+            "label": "Kotlin: Launch",
+            "description": "Launch an application with debug enabled and attach",
+            "body": {
+              "type": "kotlin",
+              "request": "launch",
+              "name": "Kotlin: Launch and Debug",
+              "command": "java -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005 -jar ^\"\\${workspaceFolder}/build/libs/your-app.jar\"",
+              "port": 5005,
+              "cwd": "^\"\\${workspaceFolder}\"",
+              "sourcePaths": [
+                "^\"\\${workspaceFolder}/src/main/kotlin\""
+              ]
+            }
+          },
+          {
+            "label": "Kotlin: Launch (Gradle)",
+            "description": "Launch a Gradle project with debug enabled",
+            "body": {
+              "type": "kotlin",
+              "request": "launch",
+              "name": "Kotlin: Launch Gradle",
+              "command": "./gradlew run -Dorg.gradle.jvmargs=\"-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005\"",
+              "port": 5005,
+              "cwd": "^\"\\${workspaceFolder}\"",
+              "sourcePaths": [
+                "^\"\\${workspaceFolder}/src/main/kotlin\""
+              ]
+            }
+          },
           {
             "label": "Kotlin: Attach",
             "description": "Attach to a running JVM with debug enabled",

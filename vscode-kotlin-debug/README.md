@@ -8,6 +8,7 @@
 
 ## ✨ 功能
 
+- 🚀 支持 launch 模式自动启动应用并调试
 - 🔗 支持 attach 模式连接到运行中的 JVM
 - 🎯 设置和管理断点（包括条件断点）
 - 📚 查看调用堆栈
@@ -47,7 +48,59 @@ bash scripts/vscode-ext.sh install
 
 ## 🚀 使用方法
 
-### 1. 启动目标程序（带调试参数）
+### 方式一：Launch 模式（推荐）
+
+Launch 模式会自动启动您的应用程序并附加调试器，无需手动启动程序。
+
+在项目的 `.vscode/launch.json` 中添加：
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "kotlin",
+      "request": "launch",
+      "name": "Kotlin: Launch and Debug",
+      "command": "java -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005 -jar ${workspaceFolder}/build/libs/your-app.jar",
+      "port": 5005,
+      "cwd": "${workspaceFolder}",
+      "sourcePaths": [
+        "${workspaceFolder}/src/main/kotlin"
+      ]
+    }
+  ]
+}
+```
+
+**Gradle 项目示例：**
+
+```json
+{
+  "type": "kotlin",
+  "request": "launch",
+  "name": "Kotlin: Launch Gradle",
+  "command": "./gradlew run -Dorg.gradle.jvmargs=\"-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005\"",
+  "port": 5005,
+  "cwd": "${workspaceFolder}",
+  "sourcePaths": [
+    "${workspaceFolder}/src/main/kotlin"
+  ]
+}
+```
+
+**配置说明：**
+- `command`: 启动应用程序的命令，**必须包含 JDWP 调试参数**，并确保端口与 `port` 配置一致
+- `port`: 调试端口，必须与命令中的 `address` 参数一致
+- `cwd`: 命令执行的工作目录
+- `env`: 环境变量（可选）
+- `preLaunchWait`: 启动命令后等待的时间（毫秒），默认 2000ms
+
+### 方式二：Attach 模式
+
+如果您需要手动控制应用程序的启动，可以使用 Attach 模式。
+
+#### 1. 启动目标程序（带调试参数）
 
 ```bash
 # 方式一：使用 suspend=y（程序会等待调试器连接）
@@ -63,7 +116,7 @@ java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 -jar you
 mvn exec:java -Dexec.args="-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005"
 ```
 
-### 2. 配置 launch.json
+#### 2. 配置 launch.json
 
 在项目的 `.vscode/launch.json` 中添加：
 
@@ -89,16 +142,35 @@ mvn exec:java -Dexec.args="-agentlib:jdwp=transport=dt_socket,server=y,suspend=y
 
 1. 在 Kotlin 源文件中设置断点（点击行号左侧）
 2. 按 `F5` 或点击侧边栏的 "Run and Debug"
-3. 选择 "Kotlin: Attach to JVM" 配置
+3. 选择对应的调试配置
 4. 调试器将连接到目标 JVM
 
 ## ⚙️ 配置选项
 
+### Launch 模式配置
+
+| 选项 | 类型 | 必填 | 默认值 | 描述 |
+|------|------|------|--------|------|
+| `command` | string | ✅ | - | 启动应用程序的命令，必须包含 JDWP 调试参数 |
+| `port` | number | ✅ | - | 调试端口，必须与命令中的 address 参数一致 |
+| `host` | string | | "localhost" | 调试主机地址 |
+| `cwd` | string | | "${workspaceFolder}" | 命令执行的工作目录 |
+| `env` | object | | {} | 环境变量 |
+| `sourcePaths` | string[] | | [] | Kotlin 源代码路径 |
+| `preLaunchWait` | number | | 2000 | 启动命令后等待的时间（毫秒） |
+
+### Attach 模式配置
+
+| 选项 | 类型 | 必填 | 默认值 | 描述 |
+|------|------|------|--------|------|
+| `host` | string | | "localhost" | 目标 JVM 主机地址 |
+| `port` | number | ✅ | - | 调试端口 |
+| `sourcePaths` | string[] | | [] | Kotlin 源代码路径 |
+
+### 全局配置
+
 | 选项 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
-| `host` | string | "localhost" | 目标 JVM 主机地址 |
-| `port` | number | 必填 | 调试端口 |
-| `sourcePaths` | string[] | [] | Kotlin 源代码路径 |
 | `kotlin-debug.debuggerJarPath` | string | "" | 自定义 debugger JAR 路径 |
 
 ## 🔍 调试功能

@@ -3,11 +3,15 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as cp from 'child_process';
 import * as os from 'os';
+import * as net from 'net';
 
 // 全局日志输出通道
 let logChannel: vscode.OutputChannel;
 let logFileWatcher: fs.StatWatcher | undefined;
 let watchedLogFile: string | undefined;
+
+// 用于跟踪通过launch模式启动的应用进程
+let launchedAppProcess: cp.ChildProcess | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Kotlin Debug extension is now active');
@@ -48,6 +52,7 @@ export function activate(context: vscode.ExtensionContext) {
             if (session.type === 'kotlin') {
                 logChannel.appendLine('\n=== Debug Session Ended ===');
                 stopLogFileWatcher();
+                stopLaunchedApp();
             }
         })
     );
@@ -55,6 +60,18 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
     stopLogFileWatcher();
+    stopLaunchedApp();
+}
+
+/**
+ * 停止通过launch模式启动的应用进程
+ */
+function stopLaunchedApp() {
+    if (launchedAppProcess && !launchedAppProcess.killed) {
+        logChannel.appendLine('[Extension] Stopping launched application process...');
+        launchedAppProcess.kill();
+        launchedAppProcess = undefined;
+    }
 }
 
 /**
@@ -144,11 +161,11 @@ function findLogFiles(): string[] {
  */
 class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
 
-    resolveDebugConfiguration(
+    async resolveDebugConfiguration(
         folder: vscode.WorkspaceFolder | undefined,
         config: vscode.DebugConfiguration,
         token?: vscode.CancellationToken
-    ): vscode.ProviderResult<vscode.DebugConfiguration> {
+    ): Promise<vscode.DebugConfiguration | undefined> {
 
         // 如果没有配置，提供默认配置
         if (!config.type && !config.request && !config.name) {
@@ -164,15 +181,174 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
         }
 
         // 验证必需的配置
-        if (config.request === 'attach') {
+        if (config.request === 'launch') {
+            if (!config.command) {
+                vscode.window.showErrorMessage('Command is required for launch mode. Provide the command to start your application with JDWP debug options.');
+                return undefined;
+            }
             if (!config.port) {
-                return vscode.window.showErrorMessage('Debug port is required for attach').then(_ => {
-                    return undefined;
-                });
+                vscode.window.showErrorMessage('Debug port is required for launch mode. This should match the port in your JDWP debug options.');
+                return undefined;
+            }
+
+            // 启动用户的应用程序
+            const launched = await this.launchApplication(config, folder);
+            if (!launched) {
+                return undefined;
+            }
+
+            // 将 launch 转换为 attach 请求
+            config.request = 'attach';
+            config.host = config.host || 'localhost';
+        } else if (config.request === 'attach') {
+            if (!config.port) {
+                vscode.window.showErrorMessage('Debug port is required for attach');
+                return undefined;
             }
         }
 
         return config;
+    }
+
+    /**
+     * 启动用户的应用程序
+     */
+    private async launchApplication(config: vscode.DebugConfiguration, folder: vscode.WorkspaceFolder | undefined): Promise<boolean> {
+        const command = config.command as string;
+        const cwd = this.resolvePath(config.cwd || '${workspaceFolder}', folder);
+        const env = config.env || {};
+        const preLaunchWait = config.preLaunchWait || 2000;
+
+        logChannel.appendLine(`[Extension] Launching application with command: ${command}`);
+        logChannel.appendLine(`[Extension] Working directory: ${cwd}`);
+        logChannel.appendLine(`[Extension] Pre-launch wait: ${preLaunchWait}ms`);
+
+        try {
+            // 停止之前启动的进程
+            if (launchedAppProcess && !launchedAppProcess.killed) {
+                launchedAppProcess.kill();
+            }
+
+            // 启动用户的应用程序
+            launchedAppProcess = cp.spawn(command, [], {
+                cwd: cwd,
+                shell: true,
+                env: { ...process.env, ...env },
+                stdio: ['ignore', 'pipe', 'pipe']
+            });
+
+            // 捕获应用程序的输出
+            launchedAppProcess.stdout?.on('data', (data: Buffer) => {
+                const message = data.toString().trim();
+                if (message) {
+                    logChannel.appendLine(`[App STDOUT] ${message}`);
+                }
+            });
+
+            launchedAppProcess.stderr?.on('data', (data: Buffer) => {
+                const message = data.toString().trim();
+                if (message) {
+                    logChannel.appendLine(`[App STDERR] ${message}`);
+                }
+            });
+
+            launchedAppProcess.on('exit', (code, signal) => {
+                if (code !== null && code !== 0) {
+                    logChannel.appendLine(`[Extension] Application exited with code: ${code}`);
+                } else if (signal) {
+                    logChannel.appendLine(`[Extension] Application was killed by signal: ${signal}`);
+                } else {
+                    logChannel.appendLine('[Extension] Application exited normally');
+                }
+                launchedAppProcess = undefined;
+            });
+
+            launchedAppProcess.on('error', (err) => {
+                logChannel.appendLine(`[Extension] Failed to start application: ${err.message}`);
+                vscode.window.showErrorMessage(`Failed to start application: ${err.message}`);
+            });
+
+            // 等待应用程序启动并开始监听调试端口
+            logChannel.appendLine(`[Extension] Waiting for application to start and open debug port ${config.port}...`);
+            
+            const port = config.port as number;
+            const host = config.host || 'localhost';
+            const maxWaitTime = preLaunchWait;
+            const checkInterval = 500;
+            const maxAttempts = Math.ceil(maxWaitTime / checkInterval);
+            
+            let portReady = false;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                // 检查进程是否仍在运行
+                if (!launchedAppProcess || launchedAppProcess.killed || launchedAppProcess.exitCode !== null) {
+                    const exitCode = launchedAppProcess?.exitCode ?? 'unknown';
+                    vscode.window.showErrorMessage(`Application exited prematurely with code: ${exitCode}`);
+                    return false;
+                }
+                
+                // 尝试连接到调试端口
+                const isPortOpen = await this.checkPort(host, port);
+                if (isPortOpen) {
+                    portReady = true;
+                    logChannel.appendLine(`[Extension] Debug port ${port} is now open`);
+                    break;
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, checkInterval));
+            }
+            
+            if (!portReady) {
+                logChannel.appendLine(`[Extension] Warning: Could not verify debug port ${port} is open, attempting to attach anyway...`);
+            }
+
+            logChannel.appendLine('[Extension] Application started, attaching debugger...');
+            return true;
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logChannel.appendLine(`[Extension] Failed to launch application: ${errorMessage}`);
+            vscode.window.showErrorMessage(`Failed to launch application: ${errorMessage}`);
+            return false;
+        }
+    }
+
+    /**
+     * 解析路径中的变量
+     */
+    private resolvePath(p: string, folder: vscode.WorkspaceFolder | undefined): string {
+        if (folder && p.includes('${workspaceFolder}')) {
+            return p.replace(/\$\{workspaceFolder\}/g, folder.uri.fsPath);
+        }
+        if (vscode.workspace.workspaceFolders && p.includes('${workspaceFolder}')) {
+            return p.replace(/\$\{workspaceFolder\}/g, vscode.workspace.workspaceFolders[0].uri.fsPath);
+        }
+        return p;
+    }
+
+    /**
+     * 检查端口是否可连接
+     */
+    private checkPort(host: string, port: number): Promise<boolean> {
+        return new Promise((resolve) => {
+            const socket = new net.Socket();
+            socket.setTimeout(1000);
+            
+            socket.on('connect', () => {
+                socket.destroy();
+                resolve(true);
+            });
+            
+            socket.on('timeout', () => {
+                socket.destroy();
+                resolve(false);
+            });
+            
+            socket.on('error', () => {
+                socket.destroy();
+                resolve(false);
+            });
+            
+            socket.connect(port, host);
+        });
     }
 
     provideDebugConfigurations(
@@ -180,6 +356,15 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
         token?: vscode.CancellationToken
     ): vscode.ProviderResult<vscode.DebugConfiguration[]> {
         return [
+            {
+                type: 'kotlin',
+                request: 'launch',
+                name: 'Kotlin: Launch and Debug',
+                command: 'java -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005 -jar ${workspaceFolder}/build/libs/your-app.jar',
+                port: 5005,
+                cwd: '${workspaceFolder}',
+                sourcePaths: ['${workspaceFolder}/src/main/kotlin']
+            },
             {
                 type: 'kotlin',
                 request: 'attach',
