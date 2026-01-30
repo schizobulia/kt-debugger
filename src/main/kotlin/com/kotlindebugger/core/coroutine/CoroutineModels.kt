@@ -22,10 +22,12 @@ enum class CoroutineState(val displayName: String) {
 }
 
 /**
- * 协程信息数据类
+ * 协程信息类
  * 包含协程的基本信息：名称、ID、状态、调度器等
+ * Note: 使用普通类而非 data class，因为包含 JDI 引用类型，
+ * 不应该参与 equals/hashCode 比较
  */
-data class CoroutineInfo(
+class CoroutineInfo(
     val id: Long?,
     val name: String,
     val state: CoroutineState,
@@ -48,6 +50,28 @@ data class CoroutineInfo(
         } else ""
         val dispatcherInfo = dispatcher?.let { " [$it]" } ?: ""
         return "\"$name:${id ?: "?"}\" ${state.displayName}$threadInfo$dispatcherInfo"
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is CoroutineInfo) return false
+        // 只比较值类型字段，排除 JDI 引用类型
+        return id == other.id && 
+               name == other.name && 
+               state == other.state &&
+               dispatcher == other.dispatcher
+    }
+
+    override fun hashCode(): Int {
+        var result = id?.hashCode() ?: 0
+        result = 31 * result + name.hashCode()
+        result = 31 * result + state.hashCode()
+        result = 31 * result + (dispatcher?.hashCode() ?: 0)
+        return result
+    }
+
+    override fun toString(): String {
+        return "CoroutineInfo(id=$id, name='$name', state=$state, dispatcher=$dispatcher)"
     }
 
     companion object {

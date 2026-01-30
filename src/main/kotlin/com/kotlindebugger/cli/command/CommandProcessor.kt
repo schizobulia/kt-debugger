@@ -4,6 +4,7 @@ import com.kotlindebugger.cli.output.OutputFormatter
 import com.kotlindebugger.common.model.*
 import com.kotlindebugger.core.DebugSession
 import com.kotlindebugger.core.SessionState
+import com.kotlindebugger.core.coroutine.CoroutineState
 import com.kotlindebugger.core.event.DebugEventListener
 import com.kotlindebugger.core.jdi.DebugTarget
 import java.io.File
@@ -517,7 +518,7 @@ class CommandProcessor(
         val grouped = coroutines.groupBy { it.state }
 
         // 先显示 RUNNING 的协程
-        grouped[com.kotlindebugger.core.coroutine.CoroutineState.RUNNING]?.let { running ->
+        grouped[CoroutineState.RUNNING]?.let { running ->
             sb.appendLine(formatter.green("  Running (${running.size}):"))
             running.forEach { coroutine ->
                 val threadInfo = coroutine.lastObservedThread?.name()?.let { " on $it" } ?: ""
@@ -529,7 +530,7 @@ class CommandProcessor(
         }
 
         // 显示 SUSPENDED 的协程
-        grouped[com.kotlindebugger.core.coroutine.CoroutineState.SUSPENDED]?.let { suspended ->
+        grouped[CoroutineState.SUSPENDED]?.let { suspended ->
             sb.appendLine(formatter.yellow("  Suspended (${suspended.size}):"))
             suspended.forEach { coroutine ->
                 sb.appendLine("    ${formatter.bold(coroutine.name)}:${coroutine.id ?: "?"} ${formatter.yellow("SUSPENDED")}")
@@ -545,7 +546,7 @@ class CommandProcessor(
         }
 
         // 显示 CREATED 的协程
-        grouped[com.kotlindebugger.core.coroutine.CoroutineState.CREATED]?.let { created ->
+        grouped[CoroutineState.CREATED]?.let { created ->
             sb.appendLine(formatter.dim("  Created (${created.size}):"))
             created.forEach { coroutine ->
                 sb.appendLine("    ${formatter.bold(coroutine.name)}:${coroutine.id ?: "?"} ${formatter.dim("CREATED")}")

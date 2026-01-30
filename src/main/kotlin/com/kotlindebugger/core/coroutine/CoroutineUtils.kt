@@ -12,9 +12,7 @@ object CoroutineUtils {
     private const val CONTINUATION_INTERFACE = "kotlin.coroutines.Continuation"
     private const val BASE_CONTINUATION_IMPL = "kotlin.coroutines.jvm.internal.BaseContinuationImpl"
     private const val COROUTINE_SCOPE = "kotlinx.coroutines.CoroutineScope"
-    private const val DEBUG_PROBES_IMPL = "kotlinx.coroutines.debug.internal.DebugProbesImpl"
     private const val JOB_INTERFACE = "kotlinx.coroutines.Job"
-    private const val DEFERRED_INTERFACE = "kotlinx.coroutines.Deferred"
     
     // SuspendLambda 相关类
     private val SUSPEND_LAMBDA_CLASSES = listOf(

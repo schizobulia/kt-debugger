@@ -4,10 +4,8 @@ import com.kotlindebugger.common.model.SourcePosition
 import com.kotlindebugger.common.util.JdiUtils.safeLineNumber
 import com.kotlindebugger.common.util.JdiUtils.safeSourceName
 import com.kotlindebugger.core.coroutine.CoroutineUtils.isBaseContinuationImpl
-import com.kotlindebugger.core.coroutine.CoroutineUtils.isContinuation
 import com.kotlindebugger.core.coroutine.CoroutineUtils.isSuspendLambda
 import com.sun.jdi.*
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 协程调试器
@@ -18,9 +16,6 @@ class CoroutineDebugger(private val vm: VirtualMachine) {
 
     // 缓存 DebugProbesImpl 类引用
     private var debugProbesImplClass: ClassType? = null
-    
-    // 协程信息缓存
-    private val coroutineCache = ConcurrentHashMap<Long, CoroutineInfo>()
 
     companion object {
         private const val DEBUG_PROBES_IMPL_CLASS = "kotlinx.coroutines.debug.internal.DebugProbesImpl"
@@ -28,7 +23,6 @@ class CoroutineDebugger(private val vm: VirtualMachine) {
         
         // 协程信息方法
         private const val DUMP_COROUTINES_INFO_METHOD = "dumpCoroutinesInfo"
-        private const val GET_DEBUG_COROUTINE_INFO_METHOD = "getDebugCoroutineInfo"
         
         // DebugCoroutineInfo 字段
         private const val COROUTINE_INFO_FIELD_STATE = "state"
@@ -36,11 +30,6 @@ class CoroutineDebugger(private val vm: VirtualMachine) {
         private const val COROUTINE_INFO_FIELD_LAST_OBSERVED_THREAD = "lastObservedThread"
         private const val COROUTINE_INFO_FIELD_LAST_OBSERVED_FRAME = "lastObservedFrame"
         private const val COROUTINE_INFO_FIELD_SEQUENCE_NUMBER = "sequenceNumber"
-        
-        // 协程状态常量
-        private const val STATE_RUNNING = "RUNNING"
-        private const val STATE_SUSPENDED = "SUSPENDED"
-        private const val STATE_CREATED = "CREATED"
     }
 
     /**
@@ -171,7 +160,7 @@ class CoroutineDebugger(private val vm: VirtualMachine) {
             // 获取状态
             val stateField = infoType.fieldByName(COROUTINE_INFO_FIELD_STATE)
             val stateObj = stateField?.let { infoRef.getValue(it) as? ObjectReference }
-            val stateStr = stateObj?.let { getEnumName(it) } ?: STATE_SUSPENDED
+            val stateStr = stateObj?.let { getEnumName(it) } ?: "SUSPENDED"
             val state = CoroutineState.fromString(stateStr)
             
             // 获取最后观察到的线程
@@ -450,7 +439,6 @@ class CoroutineDebugger(private val vm: VirtualMachine) {
      * 清除缓存
      */
     fun clearCache() {
-        coroutineCache.clear()
         debugProbesImplClass = null
     }
 
