@@ -86,6 +86,38 @@ class EventEmitter(private val output: OutputStream) {
         ))
     }
 
+    /**
+     * 发送热代码替换完成事件
+     * Send hot code replacement completed event
+     */
+    fun sendHotCodeReplaceCompleted(reloadedClasses: List<String>, message: String) {
+        Logger.info("Sending 'hotCodeReplaceCompleted' event: reloadedClasses=$reloadedClasses")
+        send(DAPEvent(
+            seq = seqCounter.getAndIncrement(),
+            event = "output",
+            body = buildJsonObject {
+                put("category", "console")
+                put("output", "[Hot Code Replace] $message\n")
+            }
+        ))
+    }
+
+    /**
+     * 发送热代码替换失败事件
+     * Send hot code replacement failed event
+     */
+    fun sendHotCodeReplaceFailed(errorMessage: String, failedClasses: List<String>) {
+        Logger.info("Sending 'hotCodeReplaceFailed' event: errorMessage=$errorMessage, failedClasses=$failedClasses")
+        send(DAPEvent(
+            seq = seqCounter.getAndIncrement(),
+            event = "output",
+            body = buildJsonObject {
+                put("category", "stderr")
+                put("output", "[Hot Code Replace Failed] $errorMessage\n")
+            }
+        ))
+    }
+
     private fun send(event: DAPEvent) {
         val jsonString = json.encodeToString(event)
         Logger.debug("=== DAP Event ===")

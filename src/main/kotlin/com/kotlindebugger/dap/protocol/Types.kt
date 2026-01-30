@@ -87,5 +87,6 @@ data class Capabilities(
     val supportsStepInTargetsRequest: Boolean = false,
     val supportsValueFormattingOptions: Boolean = true,
     val supportsExceptionInfoRequest: Boolean = false,
+    val supportsHotCodeReplace: Boolean = false,
     val exceptionBreakpointFilters: List<ExceptionBreakpointsFilter>? = null
 )

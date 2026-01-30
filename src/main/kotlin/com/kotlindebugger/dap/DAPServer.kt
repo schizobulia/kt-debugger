@@ -50,6 +50,7 @@ class DAPServer(
         dispatcher.register(StepOutHandler(this))
         dispatcher.register(EvaluateHandler(this))
         dispatcher.register(DisconnectHandler(this))
+        dispatcher.register(RedefineClassesHandler(this))
     }
 
     fun start() {
