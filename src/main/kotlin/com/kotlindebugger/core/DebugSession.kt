@@ -9,6 +9,10 @@ import com.kotlindebugger.core.coroutine.CoroutineDebugger
 import com.kotlindebugger.core.coroutine.CoroutineInfo
 import com.kotlindebugger.core.event.DebugEventListener
 import com.kotlindebugger.core.event.EventHandler
+import com.kotlindebugger.core.hotswap.ClassToRedefine
+import com.kotlindebugger.core.hotswap.HotCodeReplaceCapabilities
+import com.kotlindebugger.core.hotswap.HotCodeReplaceManager
+import com.kotlindebugger.core.hotswap.HotCodeReplaceResult
 import com.kotlindebugger.core.jdi.DebugTarget
 import com.kotlindebugger.core.jdi.VMConnector
 import com.kotlindebugger.core.source.SourceViewer
@@ -51,6 +55,7 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
     private lateinit var sourceViewer: SourceViewer
     private lateinit var positionManager: KotlinPositionManager
     private lateinit var coroutineDebugger: CoroutineDebugger
+    private lateinit var hotCodeReplaceManager: HotCodeReplaceManager
 
     private val smapCache = SMAPCache()
 
@@ -86,6 +91,7 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
         steppingController = SteppingController(vm, eventHandler, positionManager)
         variableInspector = VariableInspector(vm)
         coroutineDebugger = CoroutineDebugger(vm)
+        hotCodeReplaceManager = HotCodeReplaceManager(vm)
 
         // 初始化内联调试支持
         stackFrameManager.initializeInlineSupport()
@@ -415,6 +421,116 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
      */
     fun getCoroutineDebugStatus(): String {
         return coroutineDebugger.getDebugStatusDescription()
+    }
+
+    // ==================== 热代码替换 ====================
+
+    /**
+     * 检查是否支持热代码替换
+     * Check if hot code replacement is supported
+     */
+    fun canRedefineClasses(): Boolean {
+        return if (::hotCodeReplaceManager.isInitialized) {
+            hotCodeReplaceManager.canRedefineClasses()
+        } else {
+            false
+        }
+    }
+
+    /**
+     * 获取热代码替换能力信息
+     * Get hot code replacement capabilities
+     */
+    fun getHotCodeReplaceCapabilities(): HotCodeReplaceCapabilities? {
+        return if (::hotCodeReplaceManager.isInitialized) {
+            hotCodeReplaceManager.getCapabilities()
+        } else {
+            null
+        }
+    }
+
+    /**
+     * 执行热代码替换
+     * Perform hot code replacement from byte arrays
+     *
+     * @param classesToRedefine 要重新定义的类列表
+     * @return 热代码替换结果
+     */
+    fun redefineClasses(classesToRedefine: List<ClassToRedefine>): HotCodeReplaceResult {
+        if (!::hotCodeReplaceManager.isInitialized) {
+            return HotCodeReplaceResult.NotSupported("Debug session not started")
+        }
+
+        val result = hotCodeReplaceManager.redefineClasses(classesToRedefine)
+
+        // 发送事件通知
+        when (result) {
+            is HotCodeReplaceResult.Success -> {
+                val event = DebugEvent.HotCodeReplaceCompleted(
+                    reloadedClasses = result.reloadedClasses,
+                    message = result.message
+                )
+                listeners.forEach { it.onEvent(event) }
+            }
+            is HotCodeReplaceResult.Failure -> {
+                val event = DebugEvent.HotCodeReplaceFailed(
+                    errorMessage = result.errorMessage,
+                    failedClasses = result.failedClasses
+                )
+                listeners.forEach { it.onEvent(event) }
+            }
+            is HotCodeReplaceResult.NotSupported -> {
+                val event = DebugEvent.HotCodeReplaceFailed(
+                    errorMessage = result.reason,
+                    failedClasses = emptyList()
+                )
+                listeners.forEach { it.onEvent(event) }
+            }
+        }
+
+        return result
+    }
+
+    /**
+     * 从文件执行热代码替换
+     * Perform hot code replacement from class files
+     *
+     * @param classFiles 类名到文件路径的映射
+     * @return 热代码替换结果
+     */
+    fun redefineClassesFromFiles(classFiles: Map<String, String>): HotCodeReplaceResult {
+        if (!::hotCodeReplaceManager.isInitialized) {
+            return HotCodeReplaceResult.NotSupported("Debug session not started")
+        }
+
+        val result = hotCodeReplaceManager.redefineClassesFromFiles(classFiles)
+
+        // 发送事件通知
+        when (result) {
+            is HotCodeReplaceResult.Success -> {
+                val event = DebugEvent.HotCodeReplaceCompleted(
+                    reloadedClasses = result.reloadedClasses,
+                    message = result.message
+                )
+                listeners.forEach { it.onEvent(event) }
+            }
+            is HotCodeReplaceResult.Failure -> {
+                val event = DebugEvent.HotCodeReplaceFailed(
+                    errorMessage = result.errorMessage,
+                    failedClasses = result.failedClasses
+                )
+                listeners.forEach { it.onEvent(event) }
+            }
+            is HotCodeReplaceResult.NotSupported -> {
+                val event = DebugEvent.HotCodeReplaceFailed(
+                    errorMessage = result.reason,
+                    failedClasses = emptyList()
+                )
+                listeners.forEach { it.onEvent(event) }
+            }
+        }
+
+        return result
     }
 
     // ==================== 位置信息 ====================

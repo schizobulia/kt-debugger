@@ -178,4 +178,22 @@ sealed class DebugEvent {
     data class VMDeath(val exitCode: Int?) : DebugEvent()
 
     data class ClassPrepared(val className: String) : DebugEvent()
+
+    /**
+     * 热代码替换完成事件
+     * Hot Code Replacement completed event
+     */
+    data class HotCodeReplaceCompleted(
+        val reloadedClasses: List<String>,
+        val message: String
+    ) : DebugEvent()
+
+    /**
+     * 热代码替换失败事件
+     * Hot Code Replacement failed event
+     */
+    data class HotCodeReplaceFailed(
+        val errorMessage: String,
+        val failedClasses: List<String>
+    ) : DebugEvent()
 }

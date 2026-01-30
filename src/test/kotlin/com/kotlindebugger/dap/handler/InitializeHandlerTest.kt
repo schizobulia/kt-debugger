@@ -154,4 +154,12 @@ class InitializeHandlerTest {
         val resultStr = result.toString()
         assertTrue(resultStr.contains("supportsExceptionInfoRequest"))
     }
+
+    @Test
+    fun `test capabilities includes supportsHotCodeReplace`() = runBlocking {
+        val result = handler.handle(null, null)
+        val resultStr = result.toString()
+        assertTrue(resultStr.contains("supportsHotCodeReplace"))
+        assertTrue(resultStr.contains("true"))
+    }
 }
