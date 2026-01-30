@@ -5,6 +5,8 @@ import com.kotlindebugger.common.util.JdiUtils
 import com.kotlindebugger.core.breakpoint.BreakpointManager
 import com.kotlindebugger.core.breakpoint.ExceptionBreakpointManager
 import com.kotlindebugger.core.breakpoint.ExceptionBreakpointResult
+import com.kotlindebugger.core.coroutine.CoroutineDebugger
+import com.kotlindebugger.core.coroutine.CoroutineInfo
 import com.kotlindebugger.core.event.DebugEventListener
 import com.kotlindebugger.core.event.EventHandler
 import com.kotlindebugger.core.jdi.DebugTarget
@@ -48,6 +50,7 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
     private lateinit var variableInspector: VariableInspector
     private lateinit var sourceViewer: SourceViewer
     private lateinit var positionManager: KotlinPositionManager
+    private lateinit var coroutineDebugger: CoroutineDebugger
 
     private val smapCache = SMAPCache()
 
@@ -82,6 +85,7 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
         stackFrameManager = StackFrameManager(vm)
         steppingController = SteppingController(vm, eventHandler, positionManager)
         variableInspector = VariableInspector(vm)
+        coroutineDebugger = CoroutineDebugger(vm)
 
         // 初始化内联调试支持
         stackFrameManager.initializeInlineSupport()
@@ -389,6 +393,29 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
      * 检查是否正在单步执行
      */
     fun isStepping(): Boolean = steppingController.isStepping()
+
+    // ==================== 协程调试 ====================
+
+    /**
+     * 获取所有协程信息
+     */
+    fun getCoroutines(): List<CoroutineInfo> {
+        return coroutineDebugger.getAllCoroutines()
+    }
+
+    /**
+     * 检查协程调试探针是否已安装
+     */
+    fun isCoroutineDebugProbesInstalled(): Boolean {
+        return coroutineDebugger.isCoroutineDebugProbesInstalled()
+    }
+
+    /**
+     * 获取协程调试状态描述
+     */
+    fun getCoroutineDebugStatus(): String {
+        return coroutineDebugger.getDebugStatusDescription()
+    }
 
     // ==================== 位置信息 ====================
 

@@ -4,6 +4,7 @@ import com.kotlindebugger.cli.output.OutputFormatter
 import com.kotlindebugger.common.model.*
 import com.kotlindebugger.core.DebugSession
 import com.kotlindebugger.core.SessionState
+import com.kotlindebugger.core.coroutine.CoroutineState
 import com.kotlindebugger.core.event.DebugEventListener
 import com.kotlindebugger.core.jdi.DebugTarget
 import java.io.File
@@ -81,6 +82,8 @@ class CommandProcessor(
 
                 "threads" -> cmdThreads()
                 "thread", "t" -> cmdThread(args)
+
+                "coroutines" -> cmdCoroutines()
 
                 "list", "l" -> cmdListBreakpoints()
 
@@ -214,6 +217,9 @@ class CommandProcessor(
             ${formatter.bold("Threads:")}
               threads                 List all threads
               thread, t <id>          Switch to thread
+
+            ${formatter.bold("Coroutines:")}
+              coroutines              List all coroutines
 
             ${formatter.bold("Info:")}
               status                  Show session status
@@ -488,6 +494,73 @@ class CommandProcessor(
         } else {
             CommandResult.Error("Thread $id not found or not suspended")
         }
+    }
+
+    // ==================== 协程命令 ====================
+
+    private fun cmdCoroutines(): CommandResult {
+        val s = session ?: return CommandResult.Error("No active debug session")
+
+        if (!s.isSuspended()) {
+            return CommandResult.Error("Program is not suspended")
+        }
+
+        val coroutines = s.getCoroutines()
+        if (coroutines.isEmpty()) {
+            val status = s.getCoroutineDebugStatus()
+            return CommandResult.Message("No coroutines found.\n${formatter.dim(status)}")
+        }
+
+        val sb = StringBuilder()
+        sb.appendLine(formatter.header("Coroutines (${coroutines.size}):"))
+
+        // 按状态分组显示
+        val grouped = coroutines.groupBy { it.state }
+
+        // 先显示 RUNNING 的协程
+        grouped[CoroutineState.RUNNING]?.let { running ->
+            sb.appendLine(formatter.green("  Running (${running.size}):"))
+            running.forEach { coroutine ->
+                val threadInfo = coroutine.lastObservedThread?.name()?.let { " on $it" } ?: ""
+                sb.appendLine("    ${formatter.bold(coroutine.name)}:${coroutine.id ?: "?"} ${formatter.green("RUNNING")}$threadInfo")
+                if (coroutine.dispatcher != null) {
+                    sb.appendLine("      Dispatcher: ${coroutine.dispatcher}")
+                }
+            }
+        }
+
+        // 显示 SUSPENDED 的协程
+        grouped[CoroutineState.SUSPENDED]?.let { suspended ->
+            sb.appendLine(formatter.yellow("  Suspended (${suspended.size}):"))
+            suspended.forEach { coroutine ->
+                sb.appendLine("    ${formatter.bold(coroutine.name)}:${coroutine.id ?: "?"} ${formatter.yellow("SUSPENDED")}")
+                if (coroutine.dispatcher != null) {
+                    sb.appendLine("      Dispatcher: ${coroutine.dispatcher}")
+                }
+                // 显示栈顶帧
+                coroutine.continuationStackFrames.firstOrNull()?.let { frame ->
+                    val location = frame.location?.toString() ?: "unknown"
+                    sb.appendLine("      at ${frame.className}.${frame.methodName}($location)")
+                }
+            }
+        }
+
+        // 显示 CREATED 的协程
+        grouped[CoroutineState.CREATED]?.let { created ->
+            sb.appendLine(formatter.dim("  Created (${created.size}):"))
+            created.forEach { coroutine ->
+                sb.appendLine("    ${formatter.bold(coroutine.name)}:${coroutine.id ?: "?"} ${formatter.dim("CREATED")}")
+            }
+        }
+
+        // 显示调试状态
+        if (!s.isCoroutineDebugProbesInstalled()) {
+            sb.appendLine()
+            sb.appendLine(formatter.dim("Note: Coroutine debug probes are not installed."))
+            sb.appendLine(formatter.dim("Add -Dkotlinx.coroutines.debug to enable full coroutine debugging."))
+        }
+
+        return CommandResult.Message(sb.toString())
     }
 
     
