@@ -108,13 +108,25 @@ data class EvaluationResult(
  * 表达式求值器
  * 
  * 参考 IntelliJ IDEA 的实现思路：
- * 1. 简单表达式：直接从当前栈帧查找变量
- * 2. 成员访问表达式：解析 a.b.c 形式的表达式
- * 3. 数组访问表达式：解析 array[index] 形式的表达式
- * 4. 方法调用表达式：解析 obj.method() 形式的表达式
+ * - KotlinEvaluator: Kotlin表达式求值器
+ * - VariableFinder: 变量查找器
+ * - JDIEval: JDI接口实现
  * 
- * 注意：完整的表达式求值需要编译器支持，这里实现一个简化版本，
- * 主要支持变量访问、字段访问、数组访问和简单方法调用。
+ * 支持完整的表达式求值:
+ * - 字面量: 数字、字符串、布尔值、null
+ * - 变量访问: identifier, this
+ * - 成员访问: obj.field, obj?.field
+ * - 数组访问: array[index]
+ * - 方法调用: obj.method(args)
+ * - 算术运算: +, -, *, /, %
+ * - 比较运算: ==, !=, <, >, <=, >=
+ * - 逻辑运算: &&, ||, !
+ * - 位运算: and, or, xor, inv, shl, shr, ushr
+ * - 类型检查: is, !is
+ * - 类型转换: as, as?
+ * - 条件表达式: if-else
+ * - Elvis运算符: ?:
+ * - 对象创建: ClassName(args)
  */
 class ExpressionEvaluator(
     private val vm: VirtualMachine,
@@ -139,7 +151,9 @@ class ExpressionEvaluator(
 
         // 尝试解析和求值
         return try {
-            val value = evaluateExpression(trimmedExpr)
+            // 使用新的表达式解析器
+            val ast = parseExpression(trimmedExpr)
+            val value = evaluateNode(ast)
             createResult(value, trimmedExpr)
         } catch (e: EvaluationException) {
             throw e
@@ -149,85 +163,680 @@ class ExpressionEvaluator(
     }
 
     /**
-     * 解析并求值表达式
+     * 求值AST节点
      */
-    private fun evaluateExpression(expression: String): Value? {
-        // 1. 检查是否是字面量
-        parseLiteral(expression)?.let { return it }
-        
-        // 2. 检查是否是简单变量
-        if (isSimpleIdentifier(expression)) {
-            return findVariable(expression)
+    private fun evaluateNode(node: ExprNode): Value? {
+        return when (node) {
+            is LiteralNode -> evaluateLiteral(node)
+            is IdentifierNode -> findVariable(node.name)
+            is ThisNode -> evaluateThis()
+            is UnaryNode -> evaluateUnary(node)
+            is BinaryNode -> evaluateBinary(node)
+            is MemberAccessNode -> evaluateMemberAccess(node)
+            is ArrayAccessNode -> evaluateArrayAccess(node)
+            is MethodCallNode -> evaluateMethodCall(node)
+            is TypeCheckNode -> evaluateTypeCheck(node)
+            is TypeCastNode -> evaluateTypeCast(node)
+            is ConditionalNode -> evaluateConditional(node)
+            is NewObjectNode -> evaluateNewObject(node)
+            is ElvisNode -> evaluateElvis(node)
         }
-        
-        // 3. 检查是否是数组访问 (e.g., arr[0])
-        if (expression.contains('[') && expression.endsWith(']')) {
-            return evaluateArrayAccess(expression)
-        }
-        
-        // 4. 检查是否是成员访问或方法调用 (e.g., obj.field 或 obj.method())
-        if (expression.contains('.')) {
-            return evaluateMemberAccess(expression)
-        }
-        
-        // 5. 检查是否是方法调用 (e.g., method())
-        if (expression.contains('(') && expression.endsWith(')')) {
-            return evaluateMethodCall(null, expression)
-        }
-        
-        throw EvaluationException("Cannot evaluate expression: $expression")
     }
 
     /**
-     * 解析字面量值
+     * 求值字面量节点
      */
-    private fun parseLiteral(expression: String): Value? {
-        // null 字面量
-        if (expression == "null") {
+    private fun evaluateLiteral(node: LiteralNode): Value? {
+        return when (node.type) {
+            TokenType.NULL -> null
+            TokenType.BOOLEAN -> vm.mirrorOf(node.value as Boolean)
+            TokenType.INTEGER -> vm.mirrorOf(node.value as Int)
+            TokenType.LONG -> vm.mirrorOf(node.value as Long)
+            TokenType.FLOAT -> vm.mirrorOf(node.value as Float)
+            TokenType.DOUBLE -> vm.mirrorOf(node.value as Double)
+            TokenType.STRING -> vm.mirrorOf(node.value as String)
+            TokenType.CHAR -> vm.mirrorOf(node.value as Char)
+            else -> throw EvaluationException("Unknown literal type: ${node.type}")
+        }
+    }
+
+    /**
+     * 求值this引用
+     */
+    private fun evaluateThis(): Value? {
+        return try {
+            frame.thisObject()
+        } catch (e: Exception) {
+            throw EvaluationException("'this' is not available in static context")
+        }
+    }
+
+    /**
+     * 求值一元运算
+     */
+    private fun evaluateUnary(node: UnaryNode): Value? {
+        val operand = evaluateNode(node.operand)
+        
+        return when (node.operator) {
+            TokenType.MINUS -> evaluateNegate(operand)
+            TokenType.PLUS -> operand // Unary plus is a no-op
+            TokenType.NOT -> evaluateLogicalNot(operand)
+            TokenType.BIT_NOT -> evaluateBitwiseNot(operand)
+            else -> throw EvaluationException("Unknown unary operator: ${node.operator}")
+        }
+    }
+
+    /**
+     * 求值取反运算
+     */
+    private fun evaluateNegate(value: Value?): Value? {
+        if (value == null) throw EvaluationException("Cannot negate null")
+        
+        return when (value) {
+            is IntegerValue -> vm.mirrorOf(-value.value())
+            is LongValue -> vm.mirrorOf(-value.value())
+            is FloatValue -> vm.mirrorOf(-value.value())
+            is DoubleValue -> vm.mirrorOf(-value.value())
+            is ShortValue -> vm.mirrorOf(-value.value())
+            is ByteValue -> vm.mirrorOf(-value.value())
+            else -> throw EvaluationException("Cannot negate non-numeric value: ${value.type().name()}")
+        }
+    }
+
+    /**
+     * 求值逻辑非运算
+     */
+    private fun evaluateLogicalNot(value: Value?): Value {
+        return vm.mirrorOf(!toBooleanValue(value))
+    }
+
+    /**
+     * 求值位非运算
+     */
+    private fun evaluateBitwiseNot(value: Value?): Value? {
+        if (value == null) throw EvaluationException("Cannot apply bitwise NOT to null")
+        
+        return when (value) {
+            is IntegerValue -> vm.mirrorOf(value.value().inv())
+            is LongValue -> vm.mirrorOf(value.value().inv())
+            else -> throw EvaluationException("Cannot apply bitwise NOT to non-integer value: ${value.type().name()}")
+        }
+    }
+
+    /**
+     * 求值二元运算
+     */
+    private fun evaluateBinary(node: BinaryNode): Value? {
+        // 短路求值逻辑运算
+        if (node.operator == TokenType.AND) {
+            val left = evaluateNode(node.left)
+            if (!toBooleanValue(left)) {
+                return vm.mirrorOf(false)
+            }
+            val right = evaluateNode(node.right)
+            return vm.mirrorOf(toBooleanValue(right))
+        }
+        
+        if (node.operator == TokenType.OR) {
+            val left = evaluateNode(node.left)
+            if (toBooleanValue(left)) {
+                return vm.mirrorOf(true)
+            }
+            val right = evaluateNode(node.right)
+            return vm.mirrorOf(toBooleanValue(right))
+        }
+        
+        val left = evaluateNode(node.left)
+        val right = evaluateNode(node.right)
+        
+        return when (node.operator) {
+            // 算术运算
+            TokenType.PLUS -> evaluateAdd(left, right)
+            TokenType.MINUS -> evaluateSubtract(left, right)
+            TokenType.STAR -> evaluateMultiply(left, right)
+            TokenType.SLASH -> evaluateDivide(left, right)
+            TokenType.PERCENT -> evaluateModulo(left, right)
+            
+            // 比较运算
+            TokenType.EQ -> vm.mirrorOf(compareValues(left, right))
+            TokenType.NE -> vm.mirrorOf(!compareValues(left, right))
+            TokenType.LT -> vm.mirrorOf(compareNumeric(left, right) < 0)
+            TokenType.GT -> vm.mirrorOf(compareNumeric(left, right) > 0)
+            TokenType.LE -> vm.mirrorOf(compareNumeric(left, right) <= 0)
+            TokenType.GE -> vm.mirrorOf(compareNumeric(left, right) >= 0)
+            
+            // 位运算
+            TokenType.BIT_AND -> evaluateBitwiseAnd(left, right)
+            TokenType.BIT_OR -> evaluateBitwiseOr(left, right)
+            TokenType.BIT_XOR -> evaluateBitwiseXor(left, right)
+            TokenType.SHL -> evaluateShiftLeft(left, right)
+            TokenType.SHR -> evaluateShiftRight(left, right)
+            TokenType.USHR -> evaluateUnsignedShiftRight(left, right)
+            
+            else -> throw EvaluationException("Unknown binary operator: ${node.operator}")
+        }
+    }
+
+    /**
+     * 求值加法运算
+     */
+    private fun evaluateAdd(left: Value?, right: Value?): Value? {
+        // 字符串连接
+        if (left is StringReference || right is StringReference) {
+            val leftStr = valueToString(left)
+            val rightStr = valueToString(right)
+            return vm.mirrorOf(leftStr + rightStr)
+        }
+        
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot add null values")
+        }
+        
+        return when {
+            left is DoubleValue || right is DoubleValue -> 
+                vm.mirrorOf(toDouble(left) + toDouble(right))
+            left is FloatValue || right is FloatValue -> 
+                vm.mirrorOf(toFloat(left) + toFloat(right))
+            left is LongValue || right is LongValue -> 
+                vm.mirrorOf(toLong(left) + toLong(right))
+            else -> vm.mirrorOf(toInt(left) + toInt(right))
+        }
+    }
+
+    /**
+     * 求值减法运算
+     */
+    private fun evaluateSubtract(left: Value?, right: Value?): Value? {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot subtract null values")
+        }
+        
+        return when {
+            left is DoubleValue || right is DoubleValue -> 
+                vm.mirrorOf(toDouble(left) - toDouble(right))
+            left is FloatValue || right is FloatValue -> 
+                vm.mirrorOf(toFloat(left) - toFloat(right))
+            left is LongValue || right is LongValue -> 
+                vm.mirrorOf(toLong(left) - toLong(right))
+            else -> vm.mirrorOf(toInt(left) - toInt(right))
+        }
+    }
+
+    /**
+     * 求值乘法运算
+     */
+    private fun evaluateMultiply(left: Value?, right: Value?): Value? {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot multiply null values")
+        }
+        
+        return when {
+            left is DoubleValue || right is DoubleValue -> 
+                vm.mirrorOf(toDouble(left) * toDouble(right))
+            left is FloatValue || right is FloatValue -> 
+                vm.mirrorOf(toFloat(left) * toFloat(right))
+            left is LongValue || right is LongValue -> 
+                vm.mirrorOf(toLong(left) * toLong(right))
+            else -> vm.mirrorOf(toInt(left) * toInt(right))
+        }
+    }
+
+    /**
+     * 求值除法运算
+     */
+    private fun evaluateDivide(left: Value?, right: Value?): Value? {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot divide null values")
+        }
+        
+        // 检查除零
+        val rightNum = toDouble(right)
+        if (rightNum == 0.0 && right !is DoubleValue && right !is FloatValue) {
+            throw EvaluationException("Division by zero")
+        }
+        
+        return when {
+            left is DoubleValue || right is DoubleValue -> 
+                vm.mirrorOf(toDouble(left) / toDouble(right))
+            left is FloatValue || right is FloatValue -> 
+                vm.mirrorOf(toFloat(left) / toFloat(right))
+            left is LongValue || right is LongValue -> 
+                vm.mirrorOf(toLong(left) / toLong(right))
+            else -> vm.mirrorOf(toInt(left) / toInt(right))
+        }
+    }
+
+    /**
+     * 求值取模运算
+     */
+    private fun evaluateModulo(left: Value?, right: Value?): Value? {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot modulo null values")
+        }
+        
+        return when {
+            left is DoubleValue || right is DoubleValue -> 
+                vm.mirrorOf(toDouble(left) % toDouble(right))
+            left is FloatValue || right is FloatValue -> 
+                vm.mirrorOf(toFloat(left) % toFloat(right))
+            left is LongValue || right is LongValue -> 
+                vm.mirrorOf(toLong(left) % toLong(right))
+            else -> vm.mirrorOf(toInt(left) % toInt(right))
+        }
+    }
+
+    /**
+     * 求值位与运算
+     */
+    private fun evaluateBitwiseAnd(left: Value?, right: Value?): Value? {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot apply bitwise AND to null")
+        }
+        
+        return when {
+            left is LongValue || right is LongValue -> 
+                vm.mirrorOf(toLong(left) and toLong(right))
+            else -> vm.mirrorOf(toInt(left) and toInt(right))
+        }
+    }
+
+    /**
+     * 求值位或运算
+     */
+    private fun evaluateBitwiseOr(left: Value?, right: Value?): Value? {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot apply bitwise OR to null")
+        }
+        
+        return when {
+            left is LongValue || right is LongValue -> 
+                vm.mirrorOf(toLong(left) or toLong(right))
+            else -> vm.mirrorOf(toInt(left) or toInt(right))
+        }
+    }
+
+    /**
+     * 求值位异或运算
+     */
+    private fun evaluateBitwiseXor(left: Value?, right: Value?): Value? {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot apply bitwise XOR to null")
+        }
+        
+        return when {
+            left is LongValue || right is LongValue -> 
+                vm.mirrorOf(toLong(left) xor toLong(right))
+            else -> vm.mirrorOf(toInt(left) xor toInt(right))
+        }
+    }
+
+    /**
+     * 求值左移运算
+     */
+    private fun evaluateShiftLeft(left: Value?, right: Value?): Value? {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot apply shift to null")
+        }
+        
+        val shiftAmount = toInt(right)
+        return when (left) {
+            is LongValue -> vm.mirrorOf(left.value() shl shiftAmount)
+            else -> vm.mirrorOf(toInt(left) shl shiftAmount)
+        }
+    }
+
+    /**
+     * 求值右移运算
+     */
+    private fun evaluateShiftRight(left: Value?, right: Value?): Value? {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot apply shift to null")
+        }
+        
+        val shiftAmount = toInt(right)
+        return when (left) {
+            is LongValue -> vm.mirrorOf(left.value() shr shiftAmount)
+            else -> vm.mirrorOf(toInt(left) shr shiftAmount)
+        }
+    }
+
+    /**
+     * 求值无符号右移运算
+     */
+    private fun evaluateUnsignedShiftRight(left: Value?, right: Value?): Value? {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot apply shift to null")
+        }
+        
+        val shiftAmount = toInt(right)
+        return when (left) {
+            is LongValue -> vm.mirrorOf(left.value() ushr shiftAmount)
+            else -> vm.mirrorOf(toInt(left) ushr shiftAmount)
+        }
+    }
+
+    /**
+     * 求值成员访问节点
+     */
+    private fun evaluateMemberAccess(node: MemberAccessNode): Value? {
+        val obj = evaluateNode(node.obj)
+        
+        if (obj == null) {
+            if (node.safe) {
+                return null
+            }
+            throw EvaluationException("Cannot access member '${node.member}' on null")
+        }
+        
+        return getFieldValue(obj, node.member)
+    }
+
+    /**
+     * 求值数组访问节点
+     */
+    private fun evaluateArrayAccess(node: ArrayAccessNode): Value? {
+        val array = evaluateNode(node.array)
+        val index = evaluateNode(node.index)
+        
+        if (array !is ArrayReference) {
+            throw EvaluationException("Value is not an array")
+        }
+        
+        val idx = toInt(index ?: throw EvaluationException("Array index cannot be null"))
+        
+        if (idx < 0 || idx >= array.length()) {
+            throw EvaluationException("Array index out of bounds: $idx (length: ${array.length()})")
+        }
+        
+        return array.getValue(idx)
+    }
+
+    /**
+     * 求值方法调用节点
+     */
+    private fun evaluateMethodCall(node: MethodCallNode): Value? {
+        val receiver = if (node.receiver != null) {
+            evaluateNode(node.receiver)
+        } else {
+            null
+        }
+        
+        // Handle safe call: if receiver is null and this is a safe call, return null
+        if (receiver == null && node.receiver != null && node.safe) {
             return null
         }
         
-        // 布尔字面量
-        if (expression == "true") {
-            return vm.mirrorOf(true)
+        val args = node.arguments.map { evaluateNode(it) }
+        
+        return when {
+            receiver != null && receiver is ObjectReference -> {
+                invokeInstanceMethod(receiver, node.methodName, args)
+            }
+            receiver == null -> {
+                invokeLocalMethod(node.methodName, args)
+            }
+            else -> {
+                throw EvaluationException("Cannot invoke method on primitive type")
+            }
         }
-        if (expression == "false") {
-            return vm.mirrorOf(false)
-        }
-        
-        // 整数字面量
-        expression.toLongOrNull()?.let { return vm.mirrorOf(it.toInt()) }
-        
-        // 长整型字面量 (以L结尾)
-        if (expression.endsWith("L") || expression.endsWith("l")) {
-            expression.dropLast(1).toLongOrNull()?.let { return vm.mirrorOf(it) }
-        }
-        
-        // 浮点数字面量 (以F结尾)
-        if (expression.endsWith("F") || expression.endsWith("f")) {
-            expression.dropLast(1).toFloatOrNull()?.let { return vm.mirrorOf(it) }
-        }
-        
-        // Double 字面量
-        expression.toDoubleOrNull()?.let { return vm.mirrorOf(it) }
-        
-        // 字符串字面量 (用引号包围)
-        if ((expression.startsWith("\"") && expression.endsWith("\"")) ||
-            (expression.startsWith("'") && expression.endsWith("'"))) {
-            val content = expression.substring(1, expression.length - 1)
-            return vm.mirrorOf(content)
-        }
-        
-        return null
     }
 
     /**
-     * 检查是否是简单标识符
+     * 求值类型检查节点
      */
-    private fun isSimpleIdentifier(name: String): Boolean {
-        if (name.isEmpty()) return false
-        if (!name[0].isLetter() && name[0] != '_') return false
-        return name.all { it.isLetterOrDigit() || it == '_' }
+    private fun evaluateTypeCheck(node: TypeCheckNode): Value {
+        val value = evaluateNode(node.expr)
+        val result = isInstanceOf(value, node.typeName)
+        return vm.mirrorOf(if (node.negated) !result else result)
+    }
+
+    /**
+     * 检查值是否是指定类型的实例
+     */
+    private fun isInstanceOf(value: Value?, typeName: String): Boolean {
+        if (value == null) return false
+        
+        if (value !is ObjectReference) {
+            // 基本类型的类型检查
+            val valueTypeName = value.type().name()
+            return valueTypeName == typeName || 
+                   matchesPrimitiveType(valueTypeName, typeName)
+        }
+        
+        val refType = value.referenceType()
+        return isAssignableTo(refType, typeName)
+    }
+
+    /**
+     * 检查基本类型匹配
+     */
+    private fun matchesPrimitiveType(valueType: String, expectedType: String): Boolean {
+        val primitiveToBoxed = mapOf(
+            "int" to "java.lang.Integer",
+            "long" to "java.lang.Long",
+            "short" to "java.lang.Short",
+            "byte" to "java.lang.Byte",
+            "float" to "java.lang.Float",
+            "double" to "java.lang.Double",
+            "boolean" to "java.lang.Boolean",
+            "char" to "java.lang.Character"
+        )
+        return primitiveToBoxed[valueType] == expectedType ||
+               primitiveToBoxed.entries.find { it.value == valueType }?.key == expectedType
+    }
+
+    /**
+     * 检查类型是否可赋值给目标类型
+     */
+    private fun isAssignableTo(refType: ReferenceType, targetTypeName: String): Boolean {
+        if (refType.name() == targetTypeName) return true
+        
+        // 检查超类
+        if (refType is ClassType) {
+            var superClass = refType.superclass()
+            while (superClass != null) {
+                if (superClass.name() == targetTypeName) return true
+                superClass = superClass.superclass()
+            }
+            
+            // 检查接口
+            for (iface in refType.allInterfaces()) {
+                if (iface.name() == targetTypeName) return true
+            }
+        }
+        
+        return false
+    }
+
+    /**
+     * 求值类型转换节点
+     */
+    private fun evaluateTypeCast(node: TypeCastNode): Value? {
+        val value = evaluateNode(node.expr)
+        
+        if (value == null) {
+            if (node.safe) return null
+            throw EvaluationException("Cannot cast null to ${node.typeName}")
+        }
+        
+        if (!isInstanceOf(value, node.typeName)) {
+            if (node.safe) return null
+            throw EvaluationException("Cannot cast ${value.type().name()} to ${node.typeName}")
+        }
+        
+        return value
+    }
+
+    /**
+     * 求值条件表达式节点
+     */
+    private fun evaluateConditional(node: ConditionalNode): Value? {
+        val condition = evaluateNode(node.condition)
+        return if (toBooleanValue(condition)) {
+            evaluateNode(node.thenExpr)
+        } else {
+            evaluateNode(node.elseExpr)
+        }
+    }
+
+    /**
+     * 求值对象创建节点
+     */
+    private fun evaluateNewObject(node: NewObjectNode): Value? {
+        val className = resolveClassName(node.typeName)
+        val classType = findClassType(className)
+            ?: throw EvaluationException("Class not found: ${node.typeName}")
+        
+        val args = node.arguments.map { evaluateNode(it) }
+        
+        return invokeConstructor(classType, args)
+    }
+
+    /**
+     * 求值Elvis运算符节点
+     */
+    private fun evaluateElvis(node: ElvisNode): Value? {
+        val left = evaluateNode(node.left)
+        return left ?: evaluateNode(node.right)
+    }
+
+    /**
+     * 解析类名
+     */
+    private fun resolveClassName(typeName: String): String {
+        // 处理简单类名到全限定名的映射
+        val commonTypes = mapOf(
+            "String" to "java.lang.String",
+            "Integer" to "java.lang.Integer",
+            "Long" to "java.lang.Long",
+            "Double" to "java.lang.Double",
+            "Float" to "java.lang.Float",
+            "Boolean" to "java.lang.Boolean",
+            "List" to "java.util.ArrayList",
+            "ArrayList" to "java.util.ArrayList",
+            "Map" to "java.util.HashMap",
+            "HashMap" to "java.util.HashMap",
+            "Set" to "java.util.HashSet",
+            "HashSet" to "java.util.HashSet"
+        )
+        
+        return commonTypes[typeName] ?: typeName
+    }
+
+    /**
+     * 查找类类型
+     */
+    private fun findClassType(className: String): ClassType? {
+        return vm.classesByName(className).filterIsInstance<ClassType>().firstOrNull()
+    }
+
+    /**
+     * 调用构造函数
+     */
+    private fun invokeConstructor(classType: ClassType, args: List<Value?>): Value? {
+        val constructors = classType.methodsByName("<init>")
+        val constructor = constructors.find { it.argumentTypes().size == args.size }
+            ?: throw EvaluationException("No matching constructor with ${args.size} arguments for ${classType.name()}")
+        
+        val thread = vm.allThreads().find { it.isSuspended }
+            ?: throw EvaluationException("No suspended thread available for constructor invocation")
+        
+        return try {
+            classType.newInstance(thread, constructor, args, ObjectReference.INVOKE_SINGLE_THREADED)
+        } catch (e: InvocationException) {
+            throw EvaluationException("Constructor threw: ${e.exception().referenceType().name()}")
+        } catch (e: Exception) {
+            throw EvaluationException("Failed to create new instance: ${e.message}")
+        }
+    }
+
+    // Type conversion helper methods
+
+    private fun toInt(value: Value): Int = when (value) {
+        is IntegerValue -> value.value()
+        is LongValue -> value.value().toInt()
+        is ShortValue -> value.value().toInt()
+        is ByteValue -> value.value().toInt()
+        is CharValue -> value.value().code
+        is FloatValue -> value.value().toInt()
+        is DoubleValue -> value.value().toInt()
+        else -> throw EvaluationException("Cannot convert to int: ${value.type().name()}")
+    }
+
+    private fun toLong(value: Value): Long = when (value) {
+        is LongValue -> value.value()
+        is IntegerValue -> value.value().toLong()
+        is ShortValue -> value.value().toLong()
+        is ByteValue -> value.value().toLong()
+        is CharValue -> value.value().code.toLong()
+        is FloatValue -> value.value().toLong()
+        is DoubleValue -> value.value().toLong()
+        else -> throw EvaluationException("Cannot convert to long: ${value.type().name()}")
+    }
+
+    private fun toFloat(value: Value): Float = when (value) {
+        is FloatValue -> value.value()
+        is DoubleValue -> value.value().toFloat()
+        is IntegerValue -> value.value().toFloat()
+        is LongValue -> value.value().toFloat()
+        is ShortValue -> value.value().toFloat()
+        is ByteValue -> value.value().toFloat()
+        else -> throw EvaluationException("Cannot convert to float: ${value.type().name()}")
+    }
+
+    private fun toDouble(value: Value): Double = when (value) {
+        is DoubleValue -> value.value()
+        is FloatValue -> value.value().toDouble()
+        is IntegerValue -> value.value().toDouble()
+        is LongValue -> value.value().toDouble()
+        is ShortValue -> value.value().toDouble()
+        is ByteValue -> value.value().toDouble()
+        else -> throw EvaluationException("Cannot convert to double: ${value.type().name()}")
+    }
+
+    private fun toBooleanValue(value: Value?): Boolean = when (value) {
+        null -> false
+        is BooleanValue -> value.value()
+        else -> true // Non-null objects are truthy
+    }
+
+    private fun valueToString(value: Value?): String = when (value) {
+        null -> "null"
+        is StringReference -> value.value()
+        is BooleanValue -> value.value().toString()
+        is CharValue -> value.value().toString()
+        is PrimitiveValue -> value.toString()
+        else -> formatValue(value)
+    }
+
+    /**
+     * 比较两个值是否相等
+     */
+    private fun compareValues(left: Value?, right: Value?): Boolean {
+        if (left == null && right == null) return true
+        if (left == null || right == null) return false
+        
+        return when {
+            left is BooleanValue && right is BooleanValue -> left.value() == right.value()
+            left is CharValue && right is CharValue -> left.value() == right.value()
+            left is StringReference && right is StringReference -> left.value() == right.value()
+            left is PrimitiveValue && right is PrimitiveValue -> toDouble(left) == toDouble(right)
+            left is ObjectReference && right is ObjectReference -> left.uniqueID() == right.uniqueID()
+            else -> false
+        }
+    }
+
+    /**
+     * 数值比较
+     */
+    private fun compareNumeric(left: Value?, right: Value?): Int {
+        if (left == null || right == null) {
+            throw EvaluationException("Cannot compare null values")
+        }
+        
+        val leftNum = toDouble(left)
+        val rightNum = toDouble(right)
+        return leftNum.compareTo(rightNum)
     }
 
     /**
@@ -283,139 +892,6 @@ class ExpressionEvaluator(
     }
 
     /**
-     * 求值数组访问表达式
-     */
-    private fun evaluateArrayAccess(expression: String): Value? {
-        val bracketIndex = expression.indexOf('[')
-        val arrayExpr = expression.substring(0, bracketIndex)
-        val indexExpr = expression.substring(bracketIndex + 1, expression.length - 1)
-        
-        // 求值数组对象
-        val arrayValue = evaluateExpression(arrayExpr)
-        if (arrayValue !is ArrayReference) {
-            throw EvaluationException("'$arrayExpr' is not an array")
-        }
-        
-        // 求值索引
-        val indexValue = evaluateExpression(indexExpr)
-        val index = when (indexValue) {
-            is IntegerValue -> indexValue.value()
-            is LongValue -> indexValue.value().toInt()
-            is ShortValue -> indexValue.value().toInt()
-            is ByteValue -> indexValue.value().toInt()
-            else -> throw EvaluationException("Array index must be an integer")
-        }
-        
-        // 检查边界
-        if (index < 0 || index >= arrayValue.length()) {
-            throw EvaluationException("Array index out of bounds: $index (length: ${arrayValue.length()})")
-        }
-        
-        return arrayValue.getValue(index)
-    }
-
-    /**
-     * 求值成员访问表达式 (obj.field 或 obj.method())
-     */
-    private fun evaluateMemberAccess(expression: String): Value? {
-        val parts = splitMemberAccess(expression)
-        if (parts.size < 2) {
-            throw EvaluationException("Invalid member access expression: $expression")
-        }
-        
-        var currentValue: Value? = evaluateExpression(parts[0])
-        
-        for (i in 1 until parts.size) {
-            val member = parts[i]
-            
-            if (currentValue == null) {
-                throw EvaluationException("Cannot access member '$member' on null")
-            }
-            
-            currentValue = if (member.contains('(') && member.endsWith(')')) {
-                // 方法调用
-                evaluateMethodCall(currentValue, member)
-            } else if (member.contains('[') && member.endsWith(']')) {
-                // 数组访问
-                val bracketIndex = member.indexOf('[')
-                val fieldName = member.substring(0, bracketIndex)
-                val indexExpr = member.substring(bracketIndex + 1, member.length - 1)
-                
-                val fieldValue = if (fieldName.isEmpty()) {
-                    currentValue
-                } else {
-                    getFieldValue(currentValue, fieldName)
-                }
-                
-                if (fieldValue !is ArrayReference) {
-                    throw EvaluationException("'$fieldName' is not an array")
-                }
-                
-                val indexValue = evaluateExpression(indexExpr)
-                val index = when (indexValue) {
-                    is IntegerValue -> indexValue.value()
-                    else -> throw EvaluationException("Array index must be an integer")
-                }
-                
-                fieldValue.getValue(index)
-            } else {
-                // 字段访问
-                getFieldValue(currentValue, member)
-            }
-        }
-        
-        return currentValue
-    }
-
-    /**
-     * 分割成员访问表达式
-     */
-    private fun splitMemberAccess(expression: String): List<String> {
-        val parts = mutableListOf<String>()
-        val current = StringBuilder()
-        var depth = 0  // 括号深度
-        var inBracket = 0  // 方括号深度
-        
-        for (char in expression) {
-            when (char) {
-                '(' -> {
-                    depth++
-                    current.append(char)
-                }
-                ')' -> {
-                    depth--
-                    current.append(char)
-                }
-                '[' -> {
-                    inBracket++
-                    current.append(char)
-                }
-                ']' -> {
-                    inBracket--
-                    current.append(char)
-                }
-                '.' -> {
-                    if (depth == 0 && inBracket == 0) {
-                        if (current.isNotEmpty()) {
-                            parts.add(current.toString())
-                            current.clear()
-                        }
-                    } else {
-                        current.append(char)
-                    }
-                }
-                else -> current.append(char)
-            }
-        }
-        
-        if (current.isNotEmpty()) {
-            parts.add(current.toString())
-        }
-        
-        return parts
-    }
-
-    /**
      * 获取字段值
      */
     private fun getFieldValue(value: Value?, fieldName: String): Value? {
@@ -432,85 +908,6 @@ class ExpressionEvaluator(
             ?: throw EvaluationException("Field '$fieldName' not found in ${refType.name()}")
         
         return value.getValue(field)
-    }
-
-    /**
-     * 求值方法调用
-     */
-    private fun evaluateMethodCall(receiver: Value?, methodExpr: String): Value? {
-        val parenIndex = methodExpr.indexOf('(')
-        val methodName = methodExpr.substring(0, parenIndex)
-        val argsString = methodExpr.substring(parenIndex + 1, methodExpr.length - 1).trim()
-        
-        // 解析参数
-        val args = if (argsString.isEmpty()) {
-            emptyList()
-        } else {
-            parseArguments(argsString)
-        }
-        
-        // 求值参数
-        val argValues = args.map { evaluateExpression(it) }
-        
-        return when {
-            receiver != null && receiver is ObjectReference -> {
-                invokeInstanceMethod(receiver, methodName, argValues)
-            }
-            receiver == null -> {
-                // 尝试在当前类上调用静态方法或实例方法
-                invokeLocalMethod(methodName, argValues)
-            }
-            else -> {
-                throw EvaluationException("Cannot invoke method on primitive type")
-            }
-        }
-    }
-
-    /**
-     * 解析方法参数
-     */
-    private fun parseArguments(argsString: String): List<String> {
-        val args = mutableListOf<String>()
-        val current = StringBuilder()
-        var depth = 0
-        var inString = false
-        var stringChar = ' '
-        
-        for (char in argsString) {
-            when {
-                (char == '"' || char == '\'') && !inString -> {
-                    inString = true
-                    stringChar = char
-                    current.append(char)
-                }
-                char == stringChar && inString -> {
-                    inString = false
-                    current.append(char)
-                }
-                inString -> {
-                    current.append(char)
-                }
-                char == '(' || char == '[' -> {
-                    depth++
-                    current.append(char)
-                }
-                char == ')' || char == ']' -> {
-                    depth--
-                    current.append(char)
-                }
-                char == ',' && depth == 0 -> {
-                    args.add(current.toString().trim())
-                    current.clear()
-                }
-                else -> current.append(char)
-            }
-        }
-        
-        if (current.isNotEmpty()) {
-            args.add(current.toString().trim())
-        }
-        
-        return args
     }
 
     /**
@@ -587,6 +984,7 @@ class ExpressionEvaluator(
     /**
      * 创建求值结果
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun createResult(value: Value?, expression: String): EvaluationResult {
         val displayValue = formatValue(value)
         val typeName = value?.type()?.name() ?: "null"
