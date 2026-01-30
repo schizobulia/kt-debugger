@@ -13,12 +13,37 @@ let watchedLogFile: string | undefined;
 // 用于跟踪通过launch模式启动的应用进程
 let launchedAppProcess: cp.ChildProcess | undefined;
 
+// 状态栏项
+let statusBarItem: vscode.StatusBarItem;
+
+// 代码透镜提供者
+let codeLensProvider: KotlinDebugCodeLensProvider;
+
+// 当前调试状态
+let isDebugging = false;
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('Kotlin Debug extension is now active');
 
     // 创建全局输出通道用于显示日志
     logChannel = vscode.window.createOutputChannel('Kotlin Debugger Logs');
     context.subscriptions.push(logChannel);
+
+    // 创建状态栏项
+    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    statusBarItem.command = 'kotlin-debug.showDebugMenu';
+    updateStatusBar('ready');
+    statusBarItem.show();
+    context.subscriptions.push(statusBarItem);
+
+    // 注册代码透镜提供者
+    codeLensProvider = new KotlinDebugCodeLensProvider();
+    context.subscriptions.push(
+        vscode.languages.registerCodeLensProvider(
+            { language: 'kotlin', scheme: 'file' },
+            codeLensProvider
+        )
+    );
 
     // 注册调试适配器描述符工厂
     const factory = new KotlinDebugAdapterDescriptorFactory(context);
@@ -32,10 +57,37 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.debug.registerDebugConfigurationProvider('kotlin', configProvider)
     );
 
+    // 注册生成配置命令
+    context.subscriptions.push(
+        vscode.commands.registerCommand('kotlin-debug.generateLaunchConfig', generateLaunchConfiguration)
+    );
+
+    // 注册调试主函数命令
+    context.subscriptions.push(
+        vscode.commands.registerCommand('kotlin-debug.debugMain', (args: { file: string, line: number }) => {
+            debugMainFunction(args);
+        })
+    );
+
+    // 注册显示调试菜单命令
+    context.subscriptions.push(
+        vscode.commands.registerCommand('kotlin-debug.showDebugMenu', showDebugMenu)
+    );
+
+    // 注册悬停提供者用于调试时显示变量值
+    context.subscriptions.push(
+        vscode.languages.registerHoverProvider(
+            { language: 'kotlin', scheme: 'file' },
+            new KotlinDebugHoverProvider()
+        )
+    );
+
     // 监听调试会话开始事件
     context.subscriptions.push(
         vscode.debug.onDidStartDebugSession((session) => {
             if (session.type === 'kotlin') {
+                isDebugging = true;
+                updateStatusBar('debugging');
                 logChannel.show(true);
                 logChannel.appendLine('=== Debug Session Started ===');
                 logChannel.appendLine('Waiting for log file to be created...\n');
@@ -50,6 +102,8 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.debug.onDidTerminateDebugSession((session) => {
             if (session.type === 'kotlin') {
+                isDebugging = false;
+                updateStatusBar('ready');
                 logChannel.appendLine('\n=== Debug Session Ended ===');
                 stopLogFileWatcher();
                 stopLaunchedApp();
@@ -61,6 +115,288 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
     stopLogFileWatcher();
     stopLaunchedApp();
+    if (statusBarItem) {
+        statusBarItem.dispose();
+    }
+}
+
+/**
+ * 更新状态栏
+ */
+function updateStatusBar(state: 'ready' | 'debugging' | 'error') {
+    switch (state) {
+        case 'ready':
+            statusBarItem.text = '$(debug) Kotlin Debug';
+            statusBarItem.tooltip = 'Kotlin Debugger - Click to show debug menu';
+            statusBarItem.backgroundColor = undefined;
+            break;
+        case 'debugging':
+            statusBarItem.text = '$(debug-alt) Debugging Kotlin';
+            statusBarItem.tooltip = 'Kotlin Debugger - Debugging session active';
+            statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+            break;
+        case 'error':
+            statusBarItem.text = '$(error) Kotlin Debug Error';
+            statusBarItem.tooltip = 'Kotlin Debugger - Error occurred';
+            statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+            break;
+    }
+}
+
+/**
+ * 显示调试菜单
+ */
+async function showDebugMenu() {
+    const items: vscode.QuickPickItem[] = [
+        {
+            label: '$(add) Generate Debug Configuration',
+            description: 'Create a new launch.json configuration',
+            detail: 'Interactively generate a launch or attach configuration'
+        },
+        {
+            label: '$(play) Start Debugging',
+            description: 'Start debugging with existing configuration',
+            detail: 'Launch a debug session using an existing launch.json configuration'
+        },
+        {
+            label: '$(output) Show Debug Logs',
+            description: 'Open the debug output panel',
+            detail: 'View detailed debugger logs'
+        },
+        {
+            label: '$(book) View Documentation',
+            description: 'Open Kotlin Debug documentation',
+            detail: 'Learn how to use Kotlin Debugger for VSCode'
+        }
+    ];
+
+    const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Kotlin Debug Actions'
+    });
+
+    if (!selected) {
+        return;
+    }
+
+    switch (selected.label) {
+        case '$(add) Generate Debug Configuration':
+            await vscode.commands.executeCommand('kotlin-debug.generateLaunchConfig');
+            break;
+        case '$(play) Start Debugging':
+            await vscode.commands.executeCommand('workbench.action.debug.start');
+            break;
+        case '$(output) Show Debug Logs':
+            logChannel.show(true);
+            break;
+        case '$(book) View Documentation':
+            vscode.env.openExternal(vscode.Uri.parse('https://github.com/schizobulia/kt-debugger#readme'));
+            break;
+    }
+}
+
+/**
+ * 生成调试配置
+ */
+async function generateLaunchConfiguration() {
+    const configType = await vscode.window.showQuickPick([
+        { label: 'Launch', description: 'Start application and attach debugger', detail: 'Recommended for most projects' },
+        { label: 'Attach', description: 'Attach to a running JVM process', detail: 'Use when application is already running' },
+        { label: 'Gradle Launch', description: 'Start Gradle project with debug', detail: 'For Gradle-based Kotlin projects' }
+    ], {
+        placeHolder: 'Select configuration type'
+    });
+
+    if (!configType) {
+        return;
+    }
+
+    let config: vscode.DebugConfiguration;
+    const port = await vscode.window.showInputBox({
+        prompt: 'Enter debug port',
+        value: '5005',
+        validateInput: (value) => {
+            const num = parseInt(value);
+            if (isNaN(num) || num < 1 || num > 65535) {
+                return 'Please enter a valid port number (1-65535)';
+            }
+            return undefined;
+        }
+    });
+
+    if (!port) {
+        return;
+    }
+
+    const portNum = parseInt(port);
+
+    switch (configType.label) {
+        case 'Launch':
+            const jarPath = await vscode.window.showInputBox({
+                prompt: 'Enter the path to your JAR file (relative to workspace)',
+                value: 'build/libs/your-app.jar'
+            });
+            if (!jarPath) {
+                return;
+            }
+            config = {
+                type: 'kotlin',
+                request: 'launch',
+                name: 'Kotlin: Launch and Debug',
+                command: `java -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=${portNum} -jar \${workspaceFolder}/${jarPath}`,
+                port: portNum,
+                cwd: '${workspaceFolder}',
+                sourcePaths: ['${workspaceFolder}/src/main/kotlin']
+            };
+            break;
+        case 'Attach':
+            const host = await vscode.window.showInputBox({
+                prompt: 'Enter host address',
+                value: 'localhost'
+            });
+            if (!host) {
+                return;
+            }
+            config = {
+                type: 'kotlin',
+                request: 'attach',
+                name: 'Kotlin: Attach to JVM',
+                host: host,
+                port: portNum,
+                sourcePaths: ['${workspaceFolder}/src/main/kotlin']
+            };
+            break;
+        case 'Gradle Launch':
+            config = {
+                type: 'kotlin',
+                request: 'launch',
+                name: 'Kotlin: Launch Gradle',
+                command: `./gradlew run -Dorg.gradle.jvmargs="-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=${portNum}"`,
+                port: portNum,
+                cwd: '${workspaceFolder}',
+                sourcePaths: ['${workspaceFolder}/src/main/kotlin']
+            };
+            break;
+        default:
+            return;
+    }
+
+    // 添加或更新 launch.json
+    await addOrUpdateLaunchConfiguration(config);
+}
+
+/**
+ * 添加或更新 launch.json 配置
+ */
+async function addOrUpdateLaunchConfiguration(config: vscode.DebugConfiguration) {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+    }
+
+    const vscodePath = path.join(workspaceFolder.uri.fsPath, '.vscode');
+    const launchJsonPath = path.join(vscodePath, 'launch.json');
+
+    // 确保 .vscode 目录存在
+    if (!fs.existsSync(vscodePath)) {
+        fs.mkdirSync(vscodePath, { recursive: true });
+    }
+
+    let launchJson: { version: string; configurations: vscode.DebugConfiguration[] };
+
+    if (fs.existsSync(launchJsonPath)) {
+        try {
+            const content = fs.readFileSync(launchJsonPath, 'utf-8');
+            // Try to parse JSON (VSCode launch.json supports comments via JSON with Comments)
+            // Use a simple approach - try parsing directly first
+            launchJson = JSON.parse(content);
+        } catch (e) {
+            // If direct parsing fails, try removing simple comments
+            try {
+                const content = fs.readFileSync(launchJsonPath, 'utf-8');
+                // Remove single-line comments and multi-line comments more carefully
+                const lines = content.split('\n');
+                const cleanedLines = lines.map(line => {
+                    // Only remove comments that start at the beginning of a line (after whitespace)
+                    const trimmed = line.trim();
+                    if (trimmed.startsWith('//')) {
+                        return '';
+                    }
+                    return line;
+                });
+                const cleanedContent = cleanedLines.join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+                launchJson = JSON.parse(cleanedContent);
+            } catch {
+                logChannel.appendLine(`[Extension] Warning: Could not parse existing launch.json. Creating new configuration.`);
+                vscode.window.showWarningMessage('Could not parse existing launch.json. A new configuration will be added.');
+                launchJson = { version: '0.2.0', configurations: [] };
+            }
+        }
+    } else {
+        launchJson = { version: '0.2.0', configurations: [] };
+    }
+
+    // 检查是否存在同名配置
+    const existingIndex = launchJson.configurations.findIndex(c => c.name === config.name);
+    if (existingIndex !== -1) {
+        const action = await vscode.window.showQuickPick(['Replace', 'Add as new'], {
+            placeHolder: `Configuration "${config.name}" already exists. What would you like to do?`
+        });
+        if (!action) {
+            return;
+        }
+        if (action === 'Replace') {
+            launchJson.configurations[existingIndex] = config;
+        } else {
+            config.name = `${config.name} (${launchJson.configurations.length + 1})`;
+            launchJson.configurations.push(config);
+        }
+    } else {
+        launchJson.configurations.push(config);
+    }
+
+    fs.writeFileSync(launchJsonPath, JSON.stringify(launchJson, null, 2));
+    
+    const doc = await vscode.workspace.openTextDocument(launchJsonPath);
+    await vscode.window.showTextDocument(doc);
+    
+    vscode.window.showInformationMessage(`Debug configuration "${config.name}" has been added to launch.json`);
+}
+
+/**
+ * 调试主函数
+ */
+async function debugMainFunction(args: { file: string, line: number }) {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+    }
+
+    // 尝试检测项目类型并创建适当的配置
+    const hasGradle = fs.existsSync(path.join(workspaceFolder.uri.fsPath, 'build.gradle.kts')) ||
+                      fs.existsSync(path.join(workspaceFolder.uri.fsPath, 'build.gradle'));
+    
+    const config: vscode.DebugConfiguration = hasGradle ? {
+        type: 'kotlin',
+        request: 'launch',
+        name: 'Debug Main Function',
+        command: './gradlew run -Dorg.gradle.jvmargs="-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005"',
+        port: 5005,
+        cwd: '${workspaceFolder}',
+        sourcePaths: ['${workspaceFolder}/src/main/kotlin']
+    } : {
+        type: 'kotlin',
+        request: 'launch',
+        name: 'Debug Main Function',
+        command: 'java -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005 -jar ${workspaceFolder}/build/libs/app.jar',
+        port: 5005,
+        cwd: '${workspaceFolder}',
+        sourcePaths: ['${workspaceFolder}/src/main/kotlin']
+    };
+
+    // 启动调试会话
+    await vscode.debug.startDebugging(workspaceFolder, config);
 }
 
 /**
@@ -180,6 +516,11 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
             }
         }
 
+        // 自动检测源码路径
+        if (!config.sourcePaths || config.sourcePaths.length === 0) {
+            config.sourcePaths = await this.detectSourcePaths(folder);
+        }
+
         // 验证必需的配置
         if (config.request === 'launch') {
             if (!config.command) {
@@ -208,6 +549,46 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
         }
 
         return config;
+    }
+
+    /**
+     * 自动检测项目的源码路径
+     */
+    private async detectSourcePaths(folder: vscode.WorkspaceFolder | undefined): Promise<string[]> {
+        const sourcePaths: string[] = [];
+        const workspacePath = folder?.uri.fsPath || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        
+        if (!workspacePath) {
+            return ['${workspaceFolder}/src/main/kotlin'];
+        }
+
+        // 常见的 Kotlin 源码路径
+        const commonPaths = [
+            'src/main/kotlin',
+            'src/main/java',
+            'src/kotlin',
+            'src',
+            'app/src/main/kotlin',
+            'app/src/main/java'
+        ];
+
+        for (const relativePath of commonPaths) {
+            const fullPath = path.join(workspacePath, relativePath);
+            if (fs.existsSync(fullPath)) {
+                sourcePaths.push(`\${workspaceFolder}/${relativePath}`);
+            }
+        }
+
+        // 如果没有找到任何路径，使用默认路径
+        if (sourcePaths.length === 0) {
+            // 使用配置中的默认路径
+            const config = vscode.workspace.getConfiguration('kotlin-debug');
+            const defaultPaths = config.get<string[]>('defaultSourcePaths', ['${workspaceFolder}/src/main/kotlin']);
+            return defaultPaths;
+        }
+
+        logChannel.appendLine(`[Extension] Auto-detected source paths: ${sourcePaths.join(', ')}`);
+        return sourcePaths;
     }
 
     /**
@@ -596,5 +977,114 @@ class DebugAdapterStreamWrapper implements vscode.DebugAdapter {
         if (this.process && !this.process.killed) {
             this.process.kill();
         }
+    }
+}
+
+/**
+ * 代码透镜提供者 - 在 main 函数上显示 "Debug" 按钮
+ */
+class KotlinDebugCodeLensProvider implements vscode.CodeLensProvider {
+    private _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
+    public readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
+
+    // main 函数的正则表达式模式
+    private readonly mainFunctionPattern = /^\s*fun\s+main\s*\(/;
+
+    provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+        // 检查配置是否启用代码透镜
+        const config = vscode.workspace.getConfiguration('kotlin-debug');
+        if (!config.get<boolean>('enableCodeLens', true)) {
+            return [];
+        }
+
+        const codeLenses: vscode.CodeLens[] = [];
+        const text = document.getText();
+        const lines = text.split('\n');
+
+        for (let i = 0; i < lines.length; i++) {
+            if (this.mainFunctionPattern.test(lines[i])) {
+                const range = new vscode.Range(i, 0, i, lines[i].length);
+                
+                // Debug 按钮
+                codeLenses.push(new vscode.CodeLens(range, {
+                    title: '$(debug-start) Debug',
+                    command: 'kotlin-debug.debugMain',
+                    arguments: [{ file: document.uri.fsPath, line: i + 1 }],
+                    tooltip: 'Debug this Kotlin main function'
+                }));
+
+                // Run 按钮（不带调试）
+                codeLenses.push(new vscode.CodeLens(range, {
+                    title: '$(play) Run',
+                    command: 'workbench.action.debug.run',
+                    tooltip: 'Run without debugging'
+                }));
+            }
+        }
+
+        return codeLenses;
+    }
+
+    resolveCodeLens(codeLens: vscode.CodeLens): vscode.CodeLens {
+        return codeLens;
+    }
+
+    refresh(): void {
+        this._onDidChangeCodeLenses.fire();
+    }
+}
+
+/**
+ * 悬停提供者 - 调试时显示变量值
+ */
+class KotlinDebugHoverProvider implements vscode.HoverProvider {
+    async provideHover(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        _token: vscode.CancellationToken
+    ): Promise<vscode.Hover | undefined> {
+        // 检查配置是否启用悬停求值
+        const config = vscode.workspace.getConfiguration('kotlin-debug');
+        if (!config.get<boolean>('enableHoverEvaluation', true)) {
+            return undefined;
+        }
+
+        // 只在调试时提供悬停信息
+        if (!isDebugging || !vscode.debug.activeDebugSession) {
+            return undefined;
+        }
+
+        // 获取光标位置的单词
+        const wordRange = document.getWordRangeAtPosition(position);
+        if (!wordRange) {
+            return undefined;
+        }
+
+        const word = document.getText(wordRange);
+        
+        // 尝试求值表达式
+        try {
+            const response = await vscode.debug.activeDebugSession.customRequest('evaluate', {
+                expression: word,
+                context: 'hover'
+            });
+
+            if (response && response.result !== undefined) {
+                const markdown = new vscode.MarkdownString();
+                markdown.appendCodeblock(`${word} = ${response.result}`, 'kotlin');
+                if (response.type) {
+                    markdown.appendText(`\n**Type:** ${response.type}`);
+                }
+                return new vscode.Hover(markdown, wordRange);
+            }
+        } catch (e) {
+            // Expression evaluation failed - this is normal for non-evaluable expressions
+            // Only log if it's an unexpected error type
+            if (e instanceof Error && !e.message.includes('not available') && !e.message.includes('not found')) {
+                logChannel.appendLine(`[Extension] Hover evaluation failed for '${word}': ${e.message}`);
+            }
+        }
+
+        return undefined;
     }
 }
