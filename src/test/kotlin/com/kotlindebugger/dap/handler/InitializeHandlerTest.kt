@@ -3,6 +3,7 @@ package com.kotlindebugger.dap.handler
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Test
@@ -158,8 +159,8 @@ class InitializeHandlerTest {
     @Test
     fun `test capabilities includes supportsHotCodeReplace`() = runBlocking {
         val result = handler.handle(null, null)
-        val resultStr = result.toString()
-        assertTrue(resultStr.contains("supportsHotCodeReplace"))
-        assertTrue(resultStr.contains("true"))
+        val resultJson = json.parseToJsonElement(result.toString()).jsonObject
+        assertTrue(resultJson.containsKey("supportsHotCodeReplace"))
+        assertEquals(true, resultJson["supportsHotCodeReplace"]?.jsonPrimitive?.boolean)
     }
 }

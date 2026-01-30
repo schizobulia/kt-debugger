@@ -51,6 +51,14 @@ internal class DebugEventDispatcher(private val server: DAPServer) {
             is DebugEvent.VMDisconnected -> {
                 Logger.info("VM disconnected")
             }
+            is DebugEvent.HotCodeReplaceCompleted -> {
+                Logger.info("Hot code replace completed: ${event.message}")
+                server.eventEmitter.sendHotCodeReplaceCompleted(event.reloadedClasses, event.message)
+            }
+            is DebugEvent.HotCodeReplaceFailed -> {
+                Logger.info("Hot code replace failed: ${event.errorMessage}")
+                server.eventEmitter.sendHotCodeReplaceFailed(event.errorMessage, event.failedClasses)
+            }
             else -> {
                 Logger.debug("Unhandled debug event: $event")
             }

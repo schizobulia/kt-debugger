@@ -462,32 +462,7 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
         }
 
         val result = hotCodeReplaceManager.redefineClasses(classesToRedefine)
-
-        // 发送事件通知
-        when (result) {
-            is HotCodeReplaceResult.Success -> {
-                val event = DebugEvent.HotCodeReplaceCompleted(
-                    reloadedClasses = result.reloadedClasses,
-                    message = result.message
-                )
-                listeners.forEach { it.onEvent(event) }
-            }
-            is HotCodeReplaceResult.Failure -> {
-                val event = DebugEvent.HotCodeReplaceFailed(
-                    errorMessage = result.errorMessage,
-                    failedClasses = result.failedClasses
-                )
-                listeners.forEach { it.onEvent(event) }
-            }
-            is HotCodeReplaceResult.NotSupported -> {
-                val event = DebugEvent.HotCodeReplaceFailed(
-                    errorMessage = result.reason,
-                    failedClasses = emptyList()
-                )
-                listeners.forEach { it.onEvent(event) }
-            }
-        }
-
+        notifyHotCodeReplaceResult(result)
         return result
     }
 
@@ -504,33 +479,36 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
         }
 
         val result = hotCodeReplaceManager.redefineClassesFromFiles(classFiles)
+        notifyHotCodeReplaceResult(result)
+        return result
+    }
 
-        // 发送事件通知
-        when (result) {
+    /**
+     * 发送热代码替换结果事件通知
+     * Send hot code replacement result event notification
+     */
+    private fun notifyHotCodeReplaceResult(result: HotCodeReplaceResult) {
+        val event = when (result) {
             is HotCodeReplaceResult.Success -> {
-                val event = DebugEvent.HotCodeReplaceCompleted(
+                DebugEvent.HotCodeReplaceCompleted(
                     reloadedClasses = result.reloadedClasses,
                     message = result.message
                 )
-                listeners.forEach { it.onEvent(event) }
             }
             is HotCodeReplaceResult.Failure -> {
-                val event = DebugEvent.HotCodeReplaceFailed(
+                DebugEvent.HotCodeReplaceFailed(
                     errorMessage = result.errorMessage,
                     failedClasses = result.failedClasses
                 )
-                listeners.forEach { it.onEvent(event) }
             }
             is HotCodeReplaceResult.NotSupported -> {
-                val event = DebugEvent.HotCodeReplaceFailed(
+                DebugEvent.HotCodeReplaceFailed(
                     errorMessage = result.reason,
                     failedClasses = emptyList()
                 )
-                listeners.forEach { it.onEvent(event) }
             }
         }
-
-        return result
+        listeners.forEach { it.onEvent(event) }
     }
 
     // ==================== 位置信息 ====================
