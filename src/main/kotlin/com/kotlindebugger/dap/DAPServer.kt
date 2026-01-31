@@ -45,10 +45,12 @@ class DAPServer(
         dispatcher.register(ScopesHandler(this))
         dispatcher.register(VariablesHandler(this))
         dispatcher.register(ContinueHandler(this))
+        dispatcher.register(PauseHandler(this))
         dispatcher.register(NextHandler(this))
         dispatcher.register(StepInHandler(this))
         dispatcher.register(StepOutHandler(this))
         dispatcher.register(EvaluateHandler(this))
+        dispatcher.register(SetVariableHandler(this))
         dispatcher.register(DisconnectHandler(this))
         dispatcher.register(RedefineClassesHandler(this))
     }
