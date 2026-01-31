@@ -39,11 +39,11 @@
 
 ### 方式一：下载预构建版本
 
-从 [GitHub Releases](https://github.com/your-username/kt-debug/releases) 下载最新版本：
+从 [GitHub Releases](https://github.com/schizobulia/kt-debugger/releases) 下载最新版本：
 
 ```bash
 # 下载并解压
-wget https://github.com/your-username/kt-debug/releases/latest/download/kotlin-debugger-all.jar
+wget https://github.com/schizobulia/kt-debugger/releases/latest/download/kotlin-debugger-all.jar
 
 # 运行调试器
 java -jar kotlin-debugger-all.jar
@@ -53,8 +53,8 @@ java -jar kotlin-debugger-all.jar
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/kt-debug.git
-cd kt-debug
+git clone https://github.com/schizobulia/kt-debugger.git
+cd kt-debugger
 
 # 构建调试器
 bash scripts/build.sh

@@ -7,12 +7,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/kt-debug"
+    "url": "https://github.com/schizobulia/kt-debugger"
   },
   "bugs": {
-    "url": "https://github.com/your-username/kt-debug/issues"
+    "url": "https://github.com/schizobulia/kt-debugger/issues"
   },
-  "homepage": "https://github.com/your-username/kt-debug#readme",
+  "homepage": "https://github.com/schizobulia/kt-debugger#readme",
   "icon": "images/kotlin-debug-icon.png",
   "engines": {
     "vscode": "^1.80.0"

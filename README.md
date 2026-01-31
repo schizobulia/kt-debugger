@@ -39,11 +39,11 @@
 
 ### Option 1: Download Pre-built Release
 
-Download the latest release from [GitHub Releases](https://github.com/your-username/kt-debug/releases):
+Download the latest release from [GitHub Releases](https://github.com/schizobulia/kt-debugger/releases):
 
 ```bash
 # Download and extract
-wget https://github.com/your-username/kt-debug/releases/latest/download/kotlin-debugger-all.jar
+wget https://github.com/schizobulia/kt-debugger/releases/latest/download/kotlin-debugger-all.jar
 
 # Run the debugger
 java -jar kotlin-debugger-all.jar
@@ -53,8 +53,8 @@ java -jar kotlin-debugger-all.jar
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/kt-debug.git
-cd kt-debug
+git clone https://github.com/schizobulia/kt-debugger.git
+cd kt-debugger
 
 # Build the debugger
 bash scripts/build.sh

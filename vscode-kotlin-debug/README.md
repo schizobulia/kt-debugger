@@ -31,7 +31,7 @@
 
 ### 方式二：从 VSIX 文件安装
 
-1. 下载 `.vsix` 文件（从 [GitHub Releases](https://github.com/your-username/kt-debug/releases)）
+1. 下载 `.vsix` 文件（从 [GitHub Releases](https://github.com/schizobulia/kt-debugger/releases)）
 2. 在 VSCode 中按 `Ctrl+Shift+P` 打开命令面板
 3. 输入 "Install from VSIX" 并选择
 4. 选择下载的 `.vsix` 文件
@@ -40,8 +40,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/kt-debug.git
-cd kt-debug
+git clone https://github.com/schizobulia/kt-debugger.git
+cd kt-debugger
 
 # 构建扩展（包含 debugger JAR）
 bash scripts/vscode-ext.sh build
@@ -290,9 +290,9 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 
 ## 🔗 相关链接
 
-- [项目主页](https://github.com/your-username/kt-debug)
-- [问题反馈](https://github.com/your-username/kt-debug/issues)
-- [更新日志](https://github.com/your-username/kt-debug/releases)
+- [项目主页](https://github.com/schizobulia/kt-debugger)
+- [问题反馈](https://github.com/schizobulia/kt-debugger/issues)
+- [更新日志](https://github.com/schizobulia/kt-debugger/releases)
 
 3. **断点不生效**
    - 确保 `sourcePaths` 配置正确指向源代码目录
