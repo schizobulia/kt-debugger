@@ -23,6 +23,7 @@ import com.kotlindebugger.kotlin.position.KotlinPositionManager
 import com.kotlindebugger.kotlin.smap.SMAPCache
 import com.sun.jdi.*
 import com.sun.jdi.event.ClassPrepareEvent
+import java.nio.file.Paths
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -84,10 +85,21 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
         // 初始化组件
         eventHandler = EventHandler(vm)
         positionManager = KotlinPositionManager(vm, smapCache)
-        sourceViewer = SourceViewer() // TODO: 可以从配置中读取源代码根目录
-        breakpointManager = BreakpointManager(vm, eventHandler)
+        
+        // 初始化断点管理器（需要先初始化，以便 SourceViewer 可以使用）
+        breakpointManager = BreakpointManager(vm, eventHandler, smapCache)
+        
+        // 从 DebugTarget 获取源代码根目录配置
+        val sourceRootPaths = target.sourceRoots.map { Paths.get(it) }
+        
+        // 创建 SourceViewer，配置源代码根目录和断点查询器
+        sourceViewer = SourceViewer(
+            sourceRoots = sourceRootPaths,
+            breakpointChecker = { fileName, line -> breakpointManager.hasBreakpointAt(fileName, line) }
+        )
+        
         exceptionBreakpointManager = ExceptionBreakpointManager(vm)
-        stackFrameManager = StackFrameManager(vm)
+        stackFrameManager = StackFrameManager(vm, smapCache)
         steppingController = SteppingController(vm, eventHandler, positionManager)
         variableInspector = VariableInspector(vm)
         coroutineDebugger = CoroutineDebugger(vm)

@@ -10,6 +10,11 @@ import java.io.File
  */
 sealed class DebugTarget {
     /**
+     * 获取源代码根目录列表（可选）
+     */
+    abstract val sourceRoots: List<String>
+
+    /**
      * 启动新进程调试
      */
     data class Launch(
@@ -18,7 +23,8 @@ sealed class DebugTarget {
         val jvmArgs: List<String> = emptyList(),
         val programArgs: List<String> = emptyList(),
         val workingDir: String? = null,
-        val suspend: Boolean = true
+        val suspend: Boolean = true,
+        override val sourceRoots: List<String> = emptyList()
     ) : DebugTarget()
 
     /**
@@ -26,14 +32,16 @@ sealed class DebugTarget {
      */
     data class Attach(
         val host: String = "localhost",
-        val port: Int
+        val port: Int,
+        override val sourceRoots: List<String> = emptyList()
     ) : DebugTarget()
 
     /**
      * 通过进程ID附加
      */
     data class AttachPid(
-        val pid: Long
+        val pid: Long,
+        override val sourceRoots: List<String> = emptyList()
     ) : DebugTarget()
 }
 

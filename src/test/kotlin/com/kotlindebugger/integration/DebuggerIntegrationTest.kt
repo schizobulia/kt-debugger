@@ -14,7 +14,7 @@ import java.io.File
  * 测试断点管理和会话状态等核心功能
  *
  * 注意：断点触发相关的测试需要更复杂的设置（如使用 Attach 模式），
- * 在当前实现中作为 TODO 保留。
+ * 这些高级测试场景需要运行实际的目标进程。
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DebuggerIntegrationTest {

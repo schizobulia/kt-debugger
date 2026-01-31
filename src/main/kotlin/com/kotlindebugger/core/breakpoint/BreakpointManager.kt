@@ -4,6 +4,9 @@ import com.kotlindebugger.common.model.Breakpoint
 import com.kotlindebugger.common.model.SourcePosition
 import com.kotlindebugger.common.util.JdiUtils.safeLocationsOfLine
 import com.kotlindebugger.core.event.EventHandler
+import com.kotlindebugger.kotlin.inline.InlineBreakpointManager
+import com.kotlindebugger.kotlin.inline.InlineDebugInfoTracker
+import com.kotlindebugger.kotlin.smap.SMAPCache
 import com.sun.jdi.*
 import com.sun.jdi.request.BreakpointRequest
 import com.sun.jdi.request.ClassPrepareRequest
@@ -16,8 +19,13 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class BreakpointManager(
     private val vm: VirtualMachine,
-    private val eventHandler: EventHandler
+    private val eventHandler: EventHandler,
+    private val smapCache: SMAPCache = SMAPCache()
 ) {
+
+    // 内联断点管理器（延迟初始化）
+    private var inlineBreakpointManager: InlineBreakpointManager? = null
+    private var inlineDebugInfoTracker: InlineDebugInfoTracker? = null
 
     init {
         // 在初始化时就设置全局 ClassPrepareRequest，监听所有类的加载
@@ -41,12 +49,32 @@ class BreakpointManager(
     }
 
     /**
-     * 初始化内联断点支持（预留接口）
+     * 初始化内联断点支持
+     * 创建内联调试信息跟踪器和内联断点管理器，以支持在内联函数中设置断点
      */
     fun initializeInlineSupport() {
-        // TODO: 实现内联断点支持
-        println("内联断点功能暂未完全实现")
+        if (inlineDebugInfoTracker == null) {
+            inlineDebugInfoTracker = InlineDebugInfoTracker(smapCache)
+        }
+        if (inlineBreakpointManager == null) {
+            inlineBreakpointManager = InlineBreakpointManager(
+                virtualMachine = vm,
+                eventRequestManager = vm.eventRequestManager(),
+                debugInfoTracker = inlineDebugInfoTracker!!
+            )
+        }
     }
+
+    /**
+     * 获取内联断点管理器
+     */
+    fun getInlineBreakpointManager(): InlineBreakpointManager? = inlineBreakpointManager
+
+    /**
+     * 获取内联调试信息跟踪器
+     */
+    fun getInlineDebugInfoTracker(): InlineDebugInfoTracker? = inlineDebugInfoTracker
+
     private val breakpoints = ConcurrentHashMap<Int, BreakpointEntry>()
     private val nextId = AtomicInteger(1)
 
@@ -193,6 +221,57 @@ class BreakpointManager(
      */
     fun getBreakpoint(id: Int): Breakpoint? {
         return breakpoints[id]?.breakpoint
+    }
+
+    /**
+     * 检查指定文件和行号是否有断点
+     * @param fileName 源文件名
+     * @param line 行号
+     * @return 如果该行有启用的断点返回 true，否则返回 false
+     */
+    fun hasBreakpointAt(fileName: String, line: Int): Boolean {
+        return breakpoints.values.any { entry ->
+            val bp = entry.breakpoint
+            bp.enabled && when (bp) {
+                is Breakpoint.LineBreakpoint -> {
+                    // 使用路径分隔符正确匹配文件名
+                    val matches = filesMatch(bp.file, fileName)
+                    matches && bp.line == line
+                }
+                is Breakpoint.MethodBreakpoint -> false  // 方法断点不按行匹配
+            }
+        }
+    }
+
+    /**
+     * 检查两个文件路径是否匹配
+     * 支持完整路径匹配、纯文件名匹配和路径后缀匹配
+     */
+    private fun filesMatch(file1: String, file2: String): Boolean {
+        // 精确匹配
+        if (file1 == file2) return true
+        
+        // 标准化路径分隔符
+        val normalized1 = file1.replace('\\', '/')
+        val normalized2 = file2.replace('\\', '/')
+        
+        if (normalized1 == normalized2) return true
+        
+        // 提取纯文件名进行比较
+        val name1 = normalized1.substringAfterLast('/')
+        val name2 = normalized2.substringAfterLast('/')
+        
+        // 如果其中一个是纯文件名（不包含路径），则只比较文件名
+        if (!normalized1.contains('/') || !normalized2.contains('/')) {
+            return name1 == name2
+        }
+        
+        // 检查是否一个路径是另一个的后缀（必须是完整的路径组件）
+        if (normalized1.endsWith("/$name2") || normalized2.endsWith("/$name1")) {
+            return true
+        }
+        
+        return false
     }
 
     /**

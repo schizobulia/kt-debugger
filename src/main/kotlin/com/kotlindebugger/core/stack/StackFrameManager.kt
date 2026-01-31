@@ -4,21 +4,36 @@ import com.kotlindebugger.common.model.SourcePosition
 import com.kotlindebugger.common.model.StackFrameInfo
 import com.kotlindebugger.common.util.JdiUtils.safeLineNumber
 import com.kotlindebugger.common.util.JdiUtils.safeSourceName
+import com.kotlindebugger.kotlin.inline.InlineDebugInfoTracker
+import com.kotlindebugger.kotlin.smap.SMAPCache
 import com.sun.jdi.*
 
 /**
  * 栈帧管理器
  * 负责获取和管理栈帧信息
  */
-class StackFrameManager(private val vm: VirtualMachine) {
+class StackFrameManager(
+    private val vm: VirtualMachine,
+    private val smapCache: SMAPCache = SMAPCache()
+) {
+
+    // 内联调试信息跟踪器
+    private var inlineDebugInfoTracker: InlineDebugInfoTracker? = null
 
     /**
-     * 初始化内联调试支持（预留接口）
+     * 初始化内联调试支持
+     * 创建内联调试信息跟踪器用于追踪内联函数调用
      */
     fun initializeInlineSupport() {
-        // TODO: 实现内联调试支持
-        println("内联调试功能暂未完全实现")
+        if (inlineDebugInfoTracker == null) {
+            inlineDebugInfoTracker = InlineDebugInfoTracker(smapCache)
+        }
     }
+
+    /**
+     * 获取内联调试信息跟踪器
+     */
+    fun getInlineDebugInfoTracker(): InlineDebugInfoTracker? = inlineDebugInfoTracker
 
     /**
      * 获取指定线程的所有栈帧
@@ -157,12 +172,61 @@ class StackFrameManager(private val vm: VirtualMachine) {
 
     /**
      * 判断是否是内联函数帧
-     * TODO: 使用 SMAP 进行更准确的判断
+     * 使用 SMAP 信息和类名/方法名模式进行准确判断
      */
     private fun isInlineFrame(location: Location): Boolean {
         val typeName = location.declaringType().name()
-        return typeName.contains("\$\$inlined\$") ||
-                typeName.contains("\$inlined\$")
+        val methodName = location.method().name()
+        
+        // 方法1: 检查类名或方法名中的内联标记
+        if (typeName.contains("\$\$inlined\$") || typeName.contains("\$inlined\$") ||
+            methodName.contains("\$\$inlined\$") || methodName.contains("\$inlined\$")) {
+            return true
+        }
+        
+        // 方法2: 使用 SMAP 进行更准确的判断
+        val refType = location.declaringType()
+        val smapString = SMAPCache.extractFromReferenceType(refType)
+        if (smapString != null) {
+            val smap = smapCache.getOrParse(typeName, smapString)
+            if (smap != null) {
+                // 如果 SMAP 有行映射信息，检查当前行是否来自不同的源文件
+                val lineNumber = location.safeLineNumber()
+                if (lineNumber > 0) {
+                    val sourceResult = smap.findSourcePosition(lineNumber)
+                    if (sourceResult != null) {
+                        // 如果映射的源文件名与当前位置的源文件名不同，说明是内联的
+                        val currentSource = location.safeSourceName()
+                        if (currentSource != null && !areSourceFilesEqual(sourceResult.sourceFile, currentSource)) {
+                            return true
+                        }
+                    }
+                }
+            }
+        }
+        
+        return false
+    }
+
+    /**
+     * 比较两个源文件名是否相等
+     * 标准化路径后进行比较，处理不同的路径分隔符和相对/绝对路径
+     */
+    private fun areSourceFilesEqual(file1: String, file2: String): Boolean {
+        // 精确匹配
+        if (file1 == file2) return true
+        
+        // 标准化路径分隔符并提取文件名
+        val normalized1 = file1.replace('\\', '/')
+        val normalized2 = file2.replace('\\', '/')
+        
+        if (normalized1 == normalized2) return true
+        
+        // 比较纯文件名（不含路径）
+        val name1 = normalized1.substringAfterLast('/')
+        val name2 = normalized2.substringAfterLast('/')
+        
+        return name1 == name2
     }
 
     /**
