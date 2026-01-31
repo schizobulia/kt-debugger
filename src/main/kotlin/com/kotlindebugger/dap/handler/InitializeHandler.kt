@@ -25,6 +25,7 @@ class InitializeHandler : RequestHandler {
             supportsStepInTargetsRequest = false,
             supportsValueFormattingOptions = true,
             supportsExceptionInfoRequest = true,
+            supportsCompletionsRequest = true,
             supportsHotCodeReplace = true,
             exceptionBreakpointFilters = listOf(
                 ExceptionBreakpointsFilter(

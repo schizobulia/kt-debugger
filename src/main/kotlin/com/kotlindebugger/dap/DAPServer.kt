@@ -53,6 +53,10 @@ class DAPServer(
         dispatcher.register(SetVariableHandler(this))
         dispatcher.register(DisconnectHandler(this))
         dispatcher.register(RedefineClassesHandler(this))
+        dispatcher.register(SourceHandler(this))
+        dispatcher.register(SetFunctionBreakpointsHandler(this))
+        dispatcher.register(CompletionsHandler(this))
+        dispatcher.register(ExceptionInfoHandler(this))
     }
 
     fun start() {
