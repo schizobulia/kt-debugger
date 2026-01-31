@@ -760,6 +760,9 @@ class ExpressionEvaluator(
         }
         
         // Create IntRange or IntProgression
+        // Note: For 'until', we subtract 1 from end to make it exclusive.
+        // The step value is applied after creating the range.
+        // Example: 0 until 10 step 3 = [0, 3, 6, 9] (excludes 10)
         val rangeClassName = when (node.operator) {
             TokenType.RANGE -> "kotlin.ranges.IntRange"
             TokenType.UNTIL -> "kotlin.ranges.IntRange" // until is exclusive, handle below
@@ -771,10 +774,11 @@ class ExpressionEvaluator(
         val rangeClass = findClassType(rangeClassName)
         if (rangeClass != null) {
             // Create the range using constructor
+            // For 'until', the end is exclusive (endInt - 1 makes it inclusive for IntRange constructor)
             return when (node.operator) {
                 TokenType.RANGE -> createIntRange(startInt, endInt, stepValue)
-                TokenType.UNTIL -> createIntRange(startInt, endInt - 1, stepValue) // until is exclusive
-                TokenType.DOWNTO -> createIntProgression(startInt, endInt, -stepValue)
+                TokenType.UNTIL -> createIntRange(startInt, endInt - 1, stepValue)
+                TokenType.DOWNTO -> createIntProgression(startInt, endInt, if (stepValue > 0) -stepValue else stepValue)
                 else -> createIntRange(startInt, endInt, stepValue)
             }
         }
@@ -886,17 +890,10 @@ class ExpressionEvaluator(
         
         val result = when (collection) {
             is ArrayReference -> {
-                // Check if element is in array
-                val length = collection.length()
-                var found = false
-                for (i in 0 until length) {
-                    val arrayElement = collection.getValue(i)
-                    if (compareValues(element, arrayElement)) {
-                        found = true
-                        break
-                    }
+                // Check if element is in array using any() style early return
+                (0 until collection.length()).any { i ->
+                    compareValues(element, collection.getValue(i))
                 }
-                found
             }
             is ObjectReference -> {
                 // Try to call contains() method
@@ -907,13 +904,13 @@ class ExpressionEvaluator(
                     val thread = vm.allThreads().find { it.isSuspended }
                         ?: throw EvaluationException("No suspended thread available")
                     
-                    val result = collection.invokeMethod(
+                    val invokeResult = collection.invokeMethod(
                         thread,
                         containsMethod,
                         listOf(element),
                         ObjectReference.INVOKE_SINGLE_THREADED
                     )
-                    (result as? BooleanValue)?.value() ?: false
+                    (invokeResult as? BooleanValue)?.value() ?: false
                 } else {
                     throw EvaluationException("Collection does not support 'contains' operation")
                 }

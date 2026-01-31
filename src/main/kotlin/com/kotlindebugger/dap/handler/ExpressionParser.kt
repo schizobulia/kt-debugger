@@ -254,7 +254,6 @@ class Lexer(private val input: String) {
     private fun scanString(quote: Char): Token {
         val startPos = pos
         pos++ // skip opening quote
-        val sb = StringBuilder()
         var hasTemplates = false
         val templateParts = mutableListOf<StringTemplatePart>()
         var currentStringPart = StringBuilder()
