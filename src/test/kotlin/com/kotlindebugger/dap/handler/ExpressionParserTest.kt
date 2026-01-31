@@ -740,4 +740,300 @@ class ExpressionParserTest {
             assertNotEquals(token1, token3)
         }
     }
+    
+    @Nested
+    inner class StringTemplateTests {
+        
+        @Test
+        fun `test tokenize simple string template with variable`() {
+            val lexer = Lexer("\"Hello, \$name!\"")
+            val tokens = lexer.tokenize()
+            
+            assertEquals(2, tokens.size)
+            assertEquals(TokenType.STRING_TEMPLATE, tokens[0].type)
+            
+            @Suppress("UNCHECKED_CAST")
+            val parts = tokens[0].value as List<StringTemplatePart>
+            assertEquals(3, parts.size)
+            assertTrue(parts[0] is StringTemplatePart.Literal)
+            assertEquals("Hello, ", (parts[0] as StringTemplatePart.Literal).text)
+            assertTrue(parts[1] is StringTemplatePart.Variable)
+            assertEquals("name", (parts[1] as StringTemplatePart.Variable).name)
+            assertTrue(parts[2] is StringTemplatePart.Literal)
+            assertEquals("!", (parts[2] as StringTemplatePart.Literal).text)
+        }
+        
+        @Test
+        fun `test tokenize string template with expression`() {
+            val lexer = Lexer("\"Result: \${a + b}\"")
+            val tokens = lexer.tokenize()
+            
+            assertEquals(2, tokens.size)
+            assertEquals(TokenType.STRING_TEMPLATE, tokens[0].type)
+            
+            @Suppress("UNCHECKED_CAST")
+            val parts = tokens[0].value as List<StringTemplatePart>
+            assertEquals(2, parts.size)
+            assertTrue(parts[0] is StringTemplatePart.Literal)
+            assertEquals("Result: ", (parts[0] as StringTemplatePart.Literal).text)
+            assertTrue(parts[1] is StringTemplatePart.Expression)
+            assertEquals("a + b", (parts[1] as StringTemplatePart.Expression).expression)
+        }
+        
+        @Test
+        fun `test tokenize escaped dollar sign`() {
+            val lexer = Lexer("\"Price: \\\$100\"")
+            val tokens = lexer.tokenize()
+            
+            assertEquals(2, tokens.size)
+            assertEquals(TokenType.STRING, tokens[0].type)
+            assertEquals("Price: \$100", tokens[0].value)
+        }
+        
+        @Test
+        fun `test parse string template node`() {
+            val node = parseExpression("\"Hello, \$name!\"")
+            assertTrue(node is StringTemplateNode)
+        }
+    }
+    
+    @Nested
+    inner class RangeTests {
+        
+        @Test
+        fun `test tokenize range operator`() {
+            val lexer = Lexer("1..10")
+            val tokens = lexer.tokenize()
+            
+            assertEquals(4, tokens.size)
+            assertEquals(TokenType.INTEGER, tokens[0].type)
+            assertEquals(TokenType.RANGE, tokens[1].type)
+            assertEquals(TokenType.INTEGER, tokens[2].type)
+        }
+        
+        @Test
+        fun `test tokenize until keyword`() {
+            val lexer = Lexer("1 until 10")
+            val tokens = lexer.tokenize()
+            
+            assertEquals(4, tokens.size)
+            assertEquals(TokenType.INTEGER, tokens[0].type)
+            assertEquals(TokenType.UNTIL, tokens[1].type)
+            assertEquals(TokenType.INTEGER, tokens[2].type)
+        }
+        
+        @Test
+        fun `test tokenize downTo keyword`() {
+            val lexer = Lexer("10 downTo 1")
+            val tokens = lexer.tokenize()
+            
+            assertEquals(4, tokens.size)
+            assertEquals(TokenType.DOWNTO, tokens[1].type)
+        }
+        
+        @Test
+        fun `test tokenize step keyword`() {
+            val lexer = Lexer("1..10 step 2")
+            val tokens = lexer.tokenize()
+            
+            assertEquals(6, tokens.size)
+            assertEquals(TokenType.STEP, tokens[3].type)
+        }
+        
+        @Test
+        fun `test parse range expression`() {
+            val node = parseExpression("1..10")
+            assertTrue(node is RangeNode)
+            val rangeNode = node as RangeNode
+            assertEquals(TokenType.RANGE, rangeNode.operator)
+            assertTrue(rangeNode.start is LiteralNode)
+            assertTrue(rangeNode.end is LiteralNode)
+        }
+        
+        @Test
+        fun `test parse until expression`() {
+            val node = parseExpression("0 until 10")
+            assertTrue(node is RangeNode)
+            assertEquals(TokenType.UNTIL, (node as RangeNode).operator)
+        }
+        
+        @Test
+        fun `test parse downTo expression`() {
+            val node = parseExpression("10 downTo 0")
+            assertTrue(node is RangeNode)
+            assertEquals(TokenType.DOWNTO, (node as RangeNode).operator)
+        }
+        
+        @Test
+        fun `test parse range with step`() {
+            val node = parseExpression("1..100 step 10")
+            assertTrue(node is RangeNode)
+            val rangeNode = node as RangeNode
+            assertNotNull(rangeNode.step)
+            assertTrue(rangeNode.step is LiteralNode)
+        }
+    }
+    
+    @Nested
+    inner class InOperatorTests {
+        
+        @Test
+        fun `test tokenize in operator`() {
+            val lexer = Lexer("x in list")
+            val tokens = lexer.tokenize()
+            
+            assertEquals(4, tokens.size)
+            assertEquals(TokenType.IN, tokens[1].type)
+        }
+        
+        @Test
+        fun `test tokenize not in operator`() {
+            val lexer = Lexer("x !in list")
+            val tokens = lexer.tokenize()
+            
+            assertEquals(4, tokens.size)
+            assertEquals(TokenType.NOT_IN, tokens[1].type)
+        }
+        
+        @Test
+        fun `test parse in expression`() {
+            val node = parseExpression("x in list")
+            assertTrue(node is ContainsNode)
+            val containsNode = node as ContainsNode
+            assertFalse(containsNode.negated)
+        }
+        
+        @Test
+        fun `test parse not in expression`() {
+            val node = parseExpression("x !in list")
+            assertTrue(node is ContainsNode)
+            val containsNode = node as ContainsNode
+            assertTrue(containsNode.negated)
+        }
+        
+        @Test
+        fun `test parse in with range`() {
+            val node = parseExpression("x in 1..10")
+            assertTrue(node is ContainsNode)
+            val containsNode = node as ContainsNode
+            assertTrue(containsNode.collection is RangeNode)
+        }
+    }
+    
+    @Nested
+    inner class LambdaTests {
+        
+        @Test
+        fun `test tokenize arrow operator`() {
+            val lexer = Lexer("->")
+            val tokens = lexer.tokenize()
+            
+            assertEquals(2, tokens.size)
+            assertEquals(TokenType.ARROW, tokens[0].type)
+        }
+        
+        @Test
+        fun `test parse simple lambda`() {
+            val node = parseExpression("{ x -> x + 1 }")
+            assertTrue(node is LambdaNode)
+            val lambdaNode = node as LambdaNode
+            assertEquals(1, lambdaNode.parameters.size)
+            assertEquals("x", lambdaNode.parameters[0])
+        }
+        
+        @Test
+        fun `test parse lambda with multiple parameters`() {
+            val node = parseExpression("{ a, b -> a + b }")
+            assertTrue(node is LambdaNode)
+            val lambdaNode = node as LambdaNode
+            assertEquals(2, lambdaNode.parameters.size)
+            assertEquals("a", lambdaNode.parameters[0])
+            assertEquals("b", lambdaNode.parameters[1])
+        }
+        
+        @Test
+        fun `test parse lambda without explicit parameters`() {
+            val node = parseExpression("{ it + 1 }")
+            assertTrue(node is LambdaNode)
+            val lambdaNode = node as LambdaNode
+            assertTrue(lambdaNode.parameters.isEmpty())
+        }
+    }
+    
+    @Nested
+    inner class SpreadOperatorTests {
+        
+        @Test
+        fun `test parse spread operator`() {
+            val node = parseExpression("*array")
+            assertTrue(node is SpreadNode)
+            val spreadNode = node as SpreadNode
+            assertTrue(spreadNode.expression is IdentifierNode)
+        }
+    }
+    
+    @Nested
+    inner class NewASTNodeTests {
+        
+        @Test
+        fun `test StringTemplateNode data class`() {
+            val parts = listOf(
+                StringTemplatePart.Literal("Hello, "),
+                StringTemplatePart.Variable("name")
+            )
+            val node = StringTemplateNode(parts)
+            assertEquals(2, node.parts.size)
+        }
+        
+        @Test
+        fun `test RangeNode data class`() {
+            val start = LiteralNode(1, TokenType.INTEGER)
+            val end = LiteralNode(10, TokenType.INTEGER)
+            val node = RangeNode(start, end, TokenType.RANGE)
+            assertSame(start, node.start)
+            assertSame(end, node.end)
+            assertEquals(TokenType.RANGE, node.operator)
+            assertNull(node.step)
+        }
+        
+        @Test
+        fun `test ContainsNode data class`() {
+            val element = IdentifierNode("x")
+            val collection = IdentifierNode("list")
+            val node = ContainsNode(element, collection, negated = true)
+            assertSame(element, node.element)
+            assertSame(collection, node.collection)
+            assertTrue(node.negated)
+        }
+        
+        @Test
+        fun `test LambdaNode data class`() {
+            val body = IdentifierNode("x")
+            val node = LambdaNode(listOf("x"), body)
+            assertEquals(1, node.parameters.size)
+            assertSame(body, node.body)
+        }
+        
+        @Test
+        fun `test SpreadNode data class`() {
+            val expr = IdentifierNode("array")
+            val node = SpreadNode(expr)
+            assertSame(expr, node.expression)
+        }
+        
+        @Test
+        fun `test StringTemplatePart sealed class`() {
+            val literal = StringTemplatePart.Literal("text")
+            val variable = StringTemplatePart.Variable("name")
+            val expression = StringTemplatePart.Expression("a + b")
+            
+            assertTrue(literal is StringTemplatePart)
+            assertTrue(variable is StringTemplatePart)
+            assertTrue(expression is StringTemplatePart)
+            
+            assertEquals("text", literal.text)
+            assertEquals("name", variable.name)
+            assertEquals("a + b", expression.expression)
+        }
+    }
 }
