@@ -107,18 +107,23 @@ data class EvaluationResult(
 /**
  * 表达式求值器
  * 
- * 参考 IntelliJ IDEA 的实现思路：
+ * 参考 IntelliJ IDEA 和 Microsoft java-debug 的实现思路：
  * - KotlinEvaluator: Kotlin表达式求值器
  * - VariableFinder: 变量查找器
  * - JDIEval: JDI接口实现
+ * - java-debug ExpressionParser: 表达式解析
  * 
  * 支持完整的表达式求值:
  * - 字面量: 数字、字符串、布尔值、null
+ * - 字符串模板: "$variable" 和 "${expression}"
  * - 变量访问: identifier, this
  * - 成员访问: obj.field, obj?.field
+ * - 属性访问器: 支持getter方法 (getXxx, isXxx)
  * - 数组访问: array[index]
- * - 方法调用: obj.method(args)
+ * - 方法调用: obj.method(args)，支持方法重载解析
  * - 算术运算: +, -, *, /, %
+ * - 范围表达式: 1..10, 1 until 10, 10 downTo 1, step
+ * - 包含检查: in, !in
  * - 比较运算: ==, !=, <, >, <=, >=
  * - 逻辑运算: &&, ||, !
  * - 位运算: and, or, xor, inv, shl, shr, ushr
@@ -126,7 +131,9 @@ data class EvaluationResult(
  * - 类型转换: as, as?
  * - 条件表达式: if-else
  * - Elvis运算符: ?:
- * - 对象创建: ClassName(args)
+ * - Lambda表达式: { params -> body } (显示用途)
+ * - 展开运算符: *array
+ * - 对象创建: ClassName(args), new ClassName(args)
  */
 class ExpressionEvaluator(
     private val vm: VirtualMachine,
@@ -180,6 +187,11 @@ class ExpressionEvaluator(
             is ConditionalNode -> evaluateConditional(node)
             is NewObjectNode -> evaluateNewObject(node)
             is ElvisNode -> evaluateElvis(node)
+            is StringTemplateNode -> evaluateStringTemplate(node)
+            is RangeNode -> evaluateRange(node)
+            is ContainsNode -> evaluateContains(node)
+            is LambdaNode -> evaluateLambda(node)
+            is SpreadNode -> evaluateSpread(node)
         }
     }
 
@@ -699,6 +711,237 @@ class ExpressionEvaluator(
         val left = evaluateNode(node.left)
         return left ?: evaluateNode(node.right)
     }
+    
+    /**
+     * 求值字符串模板节点
+     * 支持 "Hello, $name!" 和 "Value: ${expression}" 形式
+     */
+    private fun evaluateStringTemplate(node: StringTemplateNode): Value? {
+        val sb = StringBuilder()
+        
+        for (part in node.parts) {
+            when (part) {
+                is StringTemplatePart.Literal -> sb.append(part.text)
+                is StringTemplatePart.Variable -> {
+                    val value = findVariable(part.name)
+                    sb.append(valueToString(value))
+                }
+                is StringTemplatePart.Expression -> {
+                    // Parse and evaluate the embedded expression
+                    val ast = parseExpression(part.expression)
+                    val value = evaluateNode(ast)
+                    sb.append(valueToString(value))
+                }
+            }
+        }
+        
+        return vm.mirrorOf(sb.toString())
+    }
+    
+    /**
+     * 求值范围表达式节点
+     * 支持 1..10, 1 until 10, 10 downTo 1, 及 step 修饰符
+     */
+    private fun evaluateRange(node: RangeNode): Value? {
+        val start = evaluateNode(node.start)
+        val end = evaluateNode(node.end)
+        
+        if (start == null || end == null) {
+            throw EvaluationException("Range bounds cannot be null")
+        }
+        
+        val startInt = toInt(start)
+        val endInt = toInt(end)
+        val stepValue = if (node.step != null) {
+            val s = evaluateNode(node.step)
+            if (s != null) toInt(s) else 1
+        } else {
+            1
+        }
+        
+        // Create IntRange or IntProgression
+        // Note: For 'until', we subtract 1 from end to make it exclusive.
+        // The step value is applied after creating the range.
+        // Example: 0 until 10 step 3 = [0, 3, 6, 9] (excludes 10)
+        val rangeClassName = when (node.operator) {
+            TokenType.RANGE -> "kotlin.ranges.IntRange"
+            TokenType.UNTIL -> "kotlin.ranges.IntRange" // until is exclusive, handle below
+            TokenType.DOWNTO -> "kotlin.ranges.IntProgression"
+            else -> "kotlin.ranges.IntRange"
+        }
+        
+        // Try to find the range class
+        val rangeClass = findClassType(rangeClassName)
+        if (rangeClass != null) {
+            // Create the range using constructor
+            // For 'until', the end is exclusive (endInt - 1 makes it inclusive for IntRange constructor)
+            return when (node.operator) {
+                TokenType.RANGE -> createIntRange(startInt, endInt, stepValue)
+                TokenType.UNTIL -> createIntRange(startInt, endInt - 1, stepValue)
+                TokenType.DOWNTO -> createIntProgression(startInt, endInt, if (stepValue > 0) -stepValue else stepValue)
+                else -> createIntRange(startInt, endInt, stepValue)
+            }
+        }
+        
+        // Fallback: return a description string if we can't create the range object
+        val rangeDescription = when (node.operator) {
+            TokenType.RANGE -> "$startInt..$endInt"
+            TokenType.UNTIL -> "$startInt until $endInt"
+            TokenType.DOWNTO -> "$startInt downTo $endInt"
+            else -> "$startInt..$endInt"
+        } + if (stepValue != 1) " step $stepValue" else ""
+        
+        return vm.mirrorOf(rangeDescription)
+    }
+    
+    /**
+     * 创建IntRange对象
+     */
+    private fun createIntRange(start: Int, endInclusive: Int, step: Int): Value? {
+        val rangeClass = findClassType("kotlin.ranges.IntRange")
+        if (rangeClass != null) {
+            try {
+                val constructor = rangeClass.methodsByName("<init>").find { 
+                    it.argumentTypes().size == 2 
+                }
+                if (constructor != null) {
+                    val thread = vm.allThreads().find { it.isSuspended }
+                        ?: throw EvaluationException("No suspended thread available")
+                    
+                    val range = rangeClass.newInstance(
+                        thread,
+                        constructor,
+                        listOf(vm.mirrorOf(start), vm.mirrorOf(endInclusive)),
+                        ObjectReference.INVOKE_SINGLE_THREADED
+                    )
+                    
+                    // If step != 1, we need to call step() on the range
+                    if (step != 1 && step > 0) {
+                        // Try to create progression with step
+                        val stepMethod = rangeClass.methodsByName("step").firstOrNull()
+                        if (stepMethod != null) {
+                            return range.invokeMethod(
+                                thread,
+                                stepMethod,
+                                listOf(vm.mirrorOf(step)),
+                                ObjectReference.INVOKE_SINGLE_THREADED
+                            )
+                        }
+                    }
+                    return range
+                }
+            } catch (e: Exception) {
+                Logger.debug("Failed to create IntRange: ${e.message}")
+            }
+        }
+        
+        // Fallback to string representation
+        val stepStr = if (step != 1) " step $step" else ""
+        return vm.mirrorOf("$start..$endInclusive$stepStr")
+    }
+    
+    /**
+     * 创建IntProgression对象（用于downTo）
+     */
+    private fun createIntProgression(start: Int, endInclusive: Int, step: Int): Value? {
+        val progClass = findClassType("kotlin.ranges.IntProgression")
+        if (progClass != null) {
+            try {
+                // Try to use the Companion.fromClosedRange method
+                val companionField = progClass.fieldByName("Companion")
+                if (companionField != null) {
+                    val companion = progClass.getValue(companionField) as? ObjectReference
+                    if (companion != null) {
+                        val fromClosedRange = companion.referenceType().methodsByName("fromClosedRange")
+                            .find { it.argumentTypes().size == 3 }
+                        if (fromClosedRange != null) {
+                            val thread = vm.allThreads().find { it.isSuspended }
+                                ?: throw EvaluationException("No suspended thread available")
+                            
+                            return companion.invokeMethod(
+                                thread,
+                                fromClosedRange,
+                                listOf(vm.mirrorOf(start), vm.mirrorOf(endInclusive), vm.mirrorOf(step)),
+                                ObjectReference.INVOKE_SINGLE_THREADED
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.debug("Failed to create IntProgression: ${e.message}")
+            }
+        }
+        
+        // Fallback to string representation
+        val stepStr = if (step != -1) " step ${-step}" else ""
+        return vm.mirrorOf("$start downTo $endInclusive$stepStr")
+    }
+    
+    /**
+     * 求值包含检查节点 (in, !in)
+     */
+    private fun evaluateContains(node: ContainsNode): Value? {
+        val element = evaluateNode(node.element)
+        val collection = evaluateNode(node.collection)
+        
+        if (collection == null) {
+            throw EvaluationException("Cannot check containment in null")
+        }
+        
+        val result = when (collection) {
+            is ArrayReference -> {
+                // Check if element is in array using any() style early return
+                (0 until collection.length()).any { i ->
+                    compareValues(element, collection.getValue(i))
+                }
+            }
+            is ObjectReference -> {
+                // Try to call contains() method
+                val containsMethod = collection.referenceType().methodsByName("contains")
+                    .find { it.argumentTypes().size == 1 }
+                
+                if (containsMethod != null) {
+                    val thread = vm.allThreads().find { it.isSuspended }
+                        ?: throw EvaluationException("No suspended thread available")
+                    
+                    val invokeResult = collection.invokeMethod(
+                        thread,
+                        containsMethod,
+                        listOf(element),
+                        ObjectReference.INVOKE_SINGLE_THREADED
+                    )
+                    (invokeResult as? BooleanValue)?.value() ?: false
+                } else {
+                    throw EvaluationException("Collection does not support 'contains' operation")
+                }
+            }
+            else -> throw EvaluationException("Cannot check containment in ${collection.type().name()}")
+        }
+        
+        return vm.mirrorOf(if (node.negated) !result else result)
+    }
+    
+    /**
+     * 求值Lambda表达式节点
+     * 注意：Lambda在调试上下文中的求值是有限的
+     */
+    private fun evaluateLambda(node: LambdaNode): Value? {
+        // Lambda expressions cannot be directly evaluated in a debug context
+        // because we can't create new bytecode at runtime.
+        // Instead, we return a description of the lambda for display purposes.
+        val params = if (node.parameters.isEmpty()) "it" else node.parameters.joinToString(", ")
+        val description = "{ $params -> ... }"
+        return vm.mirrorOf(description)
+    }
+    
+    /**
+     * 求值展开运算符节点 (*array)
+     */
+    private fun evaluateSpread(node: SpreadNode): Value? {
+        // Spread operator is only meaningful in argument lists
+        // In expression context, we just evaluate the underlying expression
+        return evaluateNode(node.expression)
+    }
 
     /**
      * 解析类名
@@ -893,6 +1136,7 @@ class ExpressionEvaluator(
 
     /**
      * 获取字段值
+     * 支持直接字段访问和属性访问器（getter方法）
      */
     private fun getFieldValue(value: Value?, fieldName: String): Value? {
         if (value == null) {
@@ -900,18 +1144,60 @@ class ExpressionEvaluator(
         }
         
         if (value !is ObjectReference) {
+            // Handle special properties on arrays
+            if (value is ArrayReference && (fieldName == "size" || fieldName == "length")) {
+                return vm.mirrorOf(value.length())
+            }
             throw EvaluationException("Cannot access field '$fieldName' on primitive type")
         }
         
         val refType = value.referenceType()
-        val field = refType.fieldByName(fieldName)
-            ?: throw EvaluationException("Field '$fieldName' not found in ${refType.name()}")
         
-        return value.getValue(field)
+        // 1. 尝试直接字段访问
+        val field = refType.fieldByName(fieldName)
+        if (field != null) {
+            return value.getValue(field)
+        }
+        
+        // 2. 尝试Kotlin属性getter (getXxx)
+        val getterName = "get${fieldName.replaceFirstChar { it.uppercase() }}"
+        val getterMethods = refType.methodsByName(getterName)
+        val getter = getterMethods.find { it.argumentTypes().isEmpty() && !it.isStatic }
+        if (getter != null) {
+            return invokeMethod(value, getter, emptyList())
+        }
+        
+        // 3. 尝试布尔属性getter (isXxx)
+        val isGetterName = "is${fieldName.replaceFirstChar { it.uppercase() }}"
+        val isGetterMethods = refType.methodsByName(isGetterName)
+        val isGetter = isGetterMethods.find { it.argumentTypes().isEmpty() && !it.isStatic }
+        if (isGetter != null) {
+            return invokeMethod(value, isGetter, emptyList())
+        }
+        
+        // 4. 尝试Kotlin属性直接访问 (对于var/val的backing field)
+        val backingField = refType.fieldByName("${fieldName}\$delegate")
+            ?: refType.fieldByName("_$fieldName")
+        if (backingField != null) {
+            return value.getValue(backingField)
+        }
+        
+        // 5. 特殊处理 size/length 属性
+        if (fieldName == "size" || fieldName == "length") {
+            // Try size() or length() method
+            val sizeMethod = refType.methodsByName("size").find { it.argumentTypes().isEmpty() }
+                ?: refType.methodsByName("length").find { it.argumentTypes().isEmpty() }
+            if (sizeMethod != null) {
+                return invokeMethod(value, sizeMethod, emptyList())
+            }
+        }
+        
+        throw EvaluationException("Field or property '$fieldName' not found in ${refType.name()}")
     }
 
     /**
      * 调用实例方法
+     * 支持方法重载解析 - 按参数类型匹配
      */
     private fun invokeInstanceMethod(obj: ObjectReference, methodName: String, args: List<Value?>): Value? {
         val refType = obj.referenceType()
@@ -919,14 +1205,159 @@ class ExpressionEvaluator(
         // 查找匹配的方法
         val methods = refType.methodsByName(methodName)
         if (methods.isEmpty()) {
+            // Try to find getter method if it's a property access
+            val getterName = "get${methodName.replaceFirstChar { it.uppercase() }}"
+            val getters = refType.methodsByName(getterName)
+            if (getters.isNotEmpty() && args.isEmpty()) {
+                val getter = getters.find { it.argumentTypes().isEmpty() }
+                if (getter != null) {
+                    return invokeMethod(obj, getter, args)
+                }
+            }
             throw EvaluationException("Method '$methodName' not found in ${refType.name()}")
         }
         
-        // 选择参数数量匹配的方法
-        val method = methods.find { it.argumentTypes().size == args.size }
+        // 首先尝试精确类型匹配
+        val method = findBestMatchingMethod(methods, args)
             ?: throw EvaluationException("No matching method '$methodName' with ${args.size} arguments")
         
-        // 获取挂起的线程
+        return invokeMethod(obj, method, args)
+    }
+    
+    /**
+     * 根据参数类型查找最佳匹配的方法
+     * 参考 IntelliJ 和 java-debug 的实现
+     */
+    private fun findBestMatchingMethod(methods: List<Method>, args: List<Value?>): Method? {
+        val candidates = methods.filter { it.argumentTypes().size == args.size }
+        
+        if (candidates.isEmpty()) return null
+        if (candidates.size == 1) return candidates.first()
+        
+        // Score each candidate based on type compatibility
+        var bestMethod: Method? = null
+        var bestScore = Int.MAX_VALUE
+        
+        for (method in candidates) {
+            val score = calculateMethodMatchScore(method, args)
+            if (score < bestScore) {
+                bestScore = score
+                bestMethod = method
+            }
+        }
+        
+        return bestMethod ?: candidates.first()
+    }
+    
+    /**
+     * 计算方法匹配分数（越低越好）
+     */
+    private fun calculateMethodMatchScore(method: Method, args: List<Value?>): Int {
+        var score = 0
+        val paramTypes = method.argumentTypes()
+        
+        for (i in args.indices) {
+            val arg = args[i]
+            val paramType = paramTypes[i]
+            
+            if (arg == null) {
+                // null can match any reference type
+                if (paramType !is PrimitiveType) {
+                    score += 1
+                } else {
+                    score += 100 // Penalty for null to primitive
+                }
+            } else {
+                val argType = arg.type()
+                
+                when {
+                    argType.name() == paramType.name() -> {
+                        score += 0 // Perfect match
+                    }
+                    isAssignableFrom(paramType, argType) -> {
+                        score += 1 // Compatible but not exact
+                    }
+                    isPrimitiveCompatible(paramType.name(), argType.name()) -> {
+                        score += 2 // Primitive widening conversion
+                    }
+                    isBoxingCompatible(paramType.name(), argType.name()) -> {
+                        score += 3 // Boxing/unboxing conversion
+                    }
+                    else -> {
+                        score += 100 // Not compatible
+                    }
+                }
+            }
+        }
+        
+        return score
+    }
+    
+    /**
+     * 检查类型是否可赋值
+     */
+    private fun isAssignableFrom(targetType: Type, sourceType: Type): Boolean {
+        if (targetType.name() == sourceType.name()) return true
+        
+        if (targetType is ReferenceType && sourceType is ReferenceType) {
+            if (sourceType is ClassType) {
+                var superClass = sourceType.superclass()
+                while (superClass != null) {
+                    if (superClass.name() == targetType.name()) return true
+                    superClass = superClass.superclass()
+                }
+                
+                for (iface in sourceType.allInterfaces()) {
+                    if (iface.name() == targetType.name()) return true
+                }
+            }
+        }
+        
+        return false
+    }
+    
+    /**
+     * 检查基本类型是否兼容（数值拓宽）
+     */
+    private fun isPrimitiveCompatible(targetType: String, sourceType: String): Boolean {
+        val wideningMap = mapOf(
+            "byte" to setOf("byte"),
+            "short" to setOf("byte", "short"),
+            "int" to setOf("byte", "short", "int", "char"),
+            "long" to setOf("byte", "short", "int", "long", "char"),
+            "float" to setOf("byte", "short", "int", "long", "float", "char"),
+            "double" to setOf("byte", "short", "int", "long", "float", "double", "char")
+        )
+        return wideningMap[targetType]?.contains(sourceType) == true
+    }
+    
+    /**
+     * 检查装箱/拆箱兼容性
+     */
+    private fun isBoxingCompatible(targetType: String, sourceType: String): Boolean {
+        val boxingMap = mapOf(
+            "java.lang.Integer" to "int",
+            "java.lang.Long" to "long",
+            "java.lang.Short" to "short",
+            "java.lang.Byte" to "byte",
+            "java.lang.Float" to "float",
+            "java.lang.Double" to "double",
+            "java.lang.Boolean" to "boolean",
+            "java.lang.Character" to "char"
+        )
+        
+        val reverseBoxingMap = boxingMap.entries.associate { (k, v) -> v to k }
+        
+        return boxingMap[targetType] == sourceType || 
+               reverseBoxingMap[targetType] == sourceType ||
+               boxingMap[sourceType] == targetType ||
+               reverseBoxingMap[sourceType] == targetType
+    }
+    
+    /**
+     * 执行方法调用
+     */
+    private fun invokeMethod(obj: ObjectReference, method: Method, args: List<Value?>): Value? {
         val thread = vm.allThreads().find { it.isSuspended }
             ?: throw EvaluationException("No suspended thread available for method invocation")
         
@@ -936,7 +1367,7 @@ class ExpressionEvaluator(
             val exception = e.exception()
             throw EvaluationException("Method invocation threw: ${exception.referenceType().name()}")
         } catch (e: Exception) {
-            throw EvaluationException("Failed to invoke method '$methodName': ${e.message}")
+            throw EvaluationException("Failed to invoke method '${method.name()}': ${e.message}")
         }
     }
 

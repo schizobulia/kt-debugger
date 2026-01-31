@@ -3,24 +3,32 @@ package com.kotlindebugger.dap.handler
 /**
  * 表达式解析器
  * 
- * 实现完整的表达式求值，参考 IntelliJ IDEA 的实现:
+ * 实现完整的表达式求值，参考 IntelliJ IDEA 和 Microsoft java-debug 的实现:
  * - KotlinExpressionParser: Kotlin表达式语法解析
  * - 支持运算符优先级
  * - 支持各种表达式类型
+ * - 方法重载解析（按参数类型匹配）
  * 
  * 支持的表达式类型:
  * - 字面量: 数字、字符串、布尔值、null
+ * - 字符串模板: "$variable" 和 "${expression}"
  * - 变量访问: identifier, this
- * - 成员访问: obj.field
+ * - 成员访问: obj.field, obj?.field
+ * - 属性访问器: 支持getter方法 (getXxx, isXxx)
  * - 数组访问: array[index]
- * - 方法调用: obj.method(args)
+ * - 方法调用: obj.method(args)，支持方法重载解析
  * - 算术运算: +, -, *, /, %
+ * - 范围表达式: 1..10, 1 until 10, 10 downTo 1, step
+ * - 包含检查: in, !in
  * - 比较运算: ==, !=, <, >, <=, >=
  * - 逻辑运算: &&, ||, !
  * - 位运算: and, or, xor, inv, shl, shr, ushr
  * - 类型检查: is, !is, as, as?
  * - 条件表达式: if-else
- * - 对象创建: ClassName(args)
+ * - Elvis运算符: ?:
+ * - Lambda表达式: { params -> body }
+ * - 展开运算符: *array
+ * - 对象创建: ClassName(args), new ClassName(args)
  */
 
 /**
@@ -30,14 +38,21 @@ enum class TokenType {
     // 字面量
     INTEGER, LONG, FLOAT, DOUBLE, STRING, CHAR, BOOLEAN, NULL,
     
+    // 字符串模板
+    STRING_TEMPLATE, // 包含 $variable 或 ${expression} 的字符串
+    
     // 标识符和关键字
     IDENTIFIER, THIS, IF, ELSE, IS, AS, NEW,
     
     // 算术运算符
     PLUS, MINUS, STAR, SLASH, PERCENT,
     
+    // 范围运算符
+    RANGE, UNTIL, DOWNTO, STEP,
+    
     // 比较运算符
     EQ, NE, LT, GT, LE, GE,
+    IN, NOT_IN,  // in 和 !in 运算符
     
     // 逻辑运算符
     AND, OR, NOT,
@@ -48,9 +63,20 @@ enum class TokenType {
     // 分隔符
     LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE,
     DOT, COMMA, COLON, QUESTION, SAFE_DOT, ELVIS,
+    SPREAD, // * for spread operator
+    ARROW, // -> for lambda
     
     // 特殊
     EOF
+}
+
+/**
+ * 字符串模板部分
+ */
+sealed class StringTemplatePart {
+    data class Literal(val text: String) : StringTemplatePart()
+    data class Variable(val name: String) : StringTemplatePart()
+    data class Expression(val expression: String) : StringTemplatePart()
 }
 
 /**
@@ -89,7 +115,11 @@ class Lexer(private val input: String) {
         "inv" to TokenType.BIT_NOT,
         "shl" to TokenType.SHL,
         "shr" to TokenType.SHR,
-        "ushr" to TokenType.USHR
+        "ushr" to TokenType.USHR,
+        "in" to TokenType.IN,
+        "until" to TokenType.UNTIL,
+        "downTo" to TokenType.DOWNTO,
+        "step" to TokenType.STEP
     )
     
     fun tokenize(): List<Token> {
@@ -224,24 +254,66 @@ class Lexer(private val input: String) {
     private fun scanString(quote: Char): Token {
         val startPos = pos
         pos++ // skip opening quote
-        val sb = StringBuilder()
+        var hasTemplates = false
+        val templateParts = mutableListOf<StringTemplatePart>()
+        var currentStringPart = StringBuilder()
         
         while (pos < length && input[pos] != quote) {
             if (input[pos] == '\\' && pos + 1 < length) {
                 pos++
-                sb.append(when (input[pos]) {
+                currentStringPart.append(when (input[pos]) {
                     'n' -> '\n'
                     't' -> '\t'
                     'r' -> '\r'
                     '\\' -> '\\'
                     '"' -> '"'
                     '\'' -> '\''
+                    '$' -> '$'
                     else -> input[pos]
                 })
+                pos++
+            } else if (input[pos] == '$' && pos + 1 < length) {
+                hasTemplates = true
+                // Save current string part if not empty
+                if (currentStringPart.isNotEmpty()) {
+                    templateParts.add(StringTemplatePart.Literal(currentStringPart.toString()))
+                    currentStringPart = StringBuilder()
+                }
+                pos++ // skip $
+                
+                if (input[pos] == '{') {
+                    // ${expression} form
+                    pos++ // skip {
+                    val exprStart = pos
+                    var braceCount = 1
+                    while (pos < length && braceCount > 0) {
+                        when (input[pos]) {
+                            '{' -> braceCount++
+                            '}' -> braceCount--
+                        }
+                        if (braceCount > 0) pos++
+                    }
+                    val expression = input.substring(exprStart, pos)
+                    templateParts.add(StringTemplatePart.Expression(expression))
+                    if (pos < length && input[pos] == '}') {
+                        pos++ // skip }
+                    }
+                } else if (input[pos].isLetterOrDigit() || input[pos] == '_') {
+                    // $variable form - scan identifier
+                    val identStart = pos
+                    while (pos < length && (input[pos].isLetterOrDigit() || input[pos] == '_')) {
+                        pos++
+                    }
+                    val identifier = input.substring(identStart, pos)
+                    templateParts.add(StringTemplatePart.Variable(identifier))
+                } else {
+                    // Standalone $ - treat as literal
+                    currentStringPart.append('$')
+                }
             } else {
-                sb.append(input[pos])
+                currentStringPart.append(input[pos])
+                pos++
             }
-            pos++
         }
         
         if (pos >= length) {
@@ -249,7 +321,17 @@ class Lexer(private val input: String) {
         }
         
         pos++ // skip closing quote
-        return Token(TokenType.STRING, sb.toString(), startPos)
+        
+        // If we found any templates, return STRING_TEMPLATE token
+        if (hasTemplates) {
+            if (currentStringPart.isNotEmpty()) {
+                templateParts.add(StringTemplatePart.Literal(currentStringPart.toString()))
+            }
+            return Token(TokenType.STRING_TEMPLATE, templateParts, startPos)
+        }
+        
+        // Otherwise, return simple STRING token
+        return Token(TokenType.STRING, currentStringPart.toString(), startPos)
     }
     
     private fun scanChar(): Token {
@@ -289,7 +371,15 @@ class Lexer(private val input: String) {
         
         return when (char) {
             '+' -> { pos++; Token(TokenType.PLUS, "+", startPos) }
-            '-' -> { pos++; Token(TokenType.MINUS, "-", startPos) }
+            '-' -> {
+                when {
+                    pos + 1 < length && input[pos + 1] == '>' -> {
+                        pos += 2
+                        Token(TokenType.ARROW, "->", startPos)
+                    }
+                    else -> { pos++; Token(TokenType.MINUS, "-", startPos) }
+                }
+            }
             '*' -> { pos++; Token(TokenType.STAR, "*", startPos) }
             '/' -> { pos++; Token(TokenType.SLASH, "/", startPos) }
             '%' -> { pos++; Token(TokenType.PERCENT, "%", startPos) }
@@ -302,8 +392,16 @@ class Lexer(private val input: String) {
             ',' -> { pos++; Token(TokenType.COMMA, ",", startPos) }
             ':' -> { pos++; Token(TokenType.COLON, ":", startPos) }
             '.' -> {
-                pos++
-                Token(TokenType.DOT, ".", startPos)
+                when {
+                    pos + 1 < length && input[pos + 1] == '.' -> {
+                        pos += 2
+                        Token(TokenType.RANGE, "..", startPos)
+                    }
+                    else -> {
+                        pos++
+                        Token(TokenType.DOT, ".", startPos)
+                    }
+                }
             }
             '?' -> {
                 when {
@@ -338,6 +436,10 @@ class Lexer(private val input: String) {
                     pos + 3 <= length && input.substring(pos, pos + 3) == "!is" -> {
                         pos += 3
                         Token(TokenType.IS, "!is", startPos)
+                    }
+                    pos + 3 <= length && input.substring(pos, pos + 3) == "!in" -> {
+                        pos += 3
+                        Token(TokenType.NOT_IN, "!in", startPos)
                     }
                     else -> {
                         pos++
@@ -463,6 +565,54 @@ data class NewObjectNode(val typeName: String, val arguments: List<ExprNode>) : 
 data class ElvisNode(val left: ExprNode, val right: ExprNode) : ExprNode()
 
 /**
+ * 字符串模板节点
+ * 用于表示包含 $variable 或 ${expression} 的字符串
+ */
+data class StringTemplateNode(val parts: List<StringTemplatePart>) : ExprNode()
+
+/**
+ * 范围表达式节点 (1..10, 1 until 10, 10 downTo 1)
+ * @param start 起始值
+ * @param end 结束值
+ * @param operator 范围运算符类型 (RANGE, UNTIL, DOWNTO)
+ * @param step 步长表达式（可选）
+ */
+data class RangeNode(
+    val start: ExprNode,
+    val end: ExprNode,
+    val operator: TokenType,
+    val step: ExprNode? = null
+) : ExprNode()
+
+/**
+ * 包含检查节点 (in, !in)
+ * @param element 要检查的元素
+ * @param collection 集合或范围
+ * @param negated 是否为 !in
+ */
+data class ContainsNode(
+    val element: ExprNode,
+    val collection: ExprNode,
+    val negated: Boolean = false
+) : ExprNode()
+
+/**
+ * Lambda表达式节点
+ * @param parameters 参数列表
+ * @param body Lambda体表达式
+ */
+data class LambdaNode(
+    val parameters: List<String>,
+    val body: ExprNode
+) : ExprNode()
+
+/**
+ * 展开运算符节点 (*array)
+ * @param expression 要展开的数组/集合表达式
+ */
+data class SpreadNode(val expression: ExprNode) : ExprNode()
+
+/**
  * 表达式解析器
  * 
  * 使用递归下降解析，支持完整的运算符优先级
@@ -575,7 +725,7 @@ class ExpressionParser(private val tokens: List<Token>) {
     }
     
     private fun parseComparison(): ExprNode {
-        var left = parseShift()
+        var left = parseContains()
         
         while (check(TokenType.LT) || check(TokenType.GT) || 
                check(TokenType.LE) || check(TokenType.GE) ||
@@ -586,9 +736,42 @@ class ExpressionParser(private val tokens: List<Token>) {
                 val typeName = parseTypeName()
                 left = TypeCheckNode(left, typeName, negated)
             } else {
-                val right = parseShift()
+                val right = parseContains()
                 left = BinaryNode(left, op.type, right)
             }
+        }
+        
+        return left
+    }
+    
+    private fun parseContains(): ExprNode {
+        var left = parseRange()
+        
+        while (check(TokenType.IN) || check(TokenType.NOT_IN)) {
+            val negated = current().type == TokenType.NOT_IN
+            advance()
+            val right = parseRange()
+            left = ContainsNode(left, right, negated)
+        }
+        
+        return left
+    }
+    
+    private fun parseRange(): ExprNode {
+        var left = parseShift()
+        
+        while (check(TokenType.RANGE) || check(TokenType.UNTIL) || check(TokenType.DOWNTO)) {
+            val op = advance().type
+            val right = parseShift()
+            
+            // Check for step
+            val step = if (match(TokenType.STEP)) {
+                parseShift()
+            } else {
+                null
+            }
+            
+            left = RangeNode(left, right, op, step)
         }
         
         return left
@@ -690,12 +873,22 @@ class ExpressionParser(private val tokens: List<Token>) {
                 val token = advance()
                 LiteralNode(token.value, token.type)
             }
+            check(TokenType.STRING_TEMPLATE) -> {
+                val token = advance()
+                @Suppress("UNCHECKED_CAST")
+                StringTemplateNode(token.value as List<StringTemplatePart>)
+            }
             check(TokenType.THIS) -> {
                 advance()
                 ThisNode
             }
             check(TokenType.IF) -> parseIfExpression()
             check(TokenType.NEW) -> parseNewObject()
+            check(TokenType.STAR) -> {
+                // Spread operator: *array
+                advance()
+                SpreadNode(parseUnary())
+            }
             check(TokenType.IDENTIFIER) -> {
                 val name = advance().value as String
                 when {
@@ -718,8 +911,64 @@ class ExpressionParser(private val tokens: List<Token>) {
                 expect(TokenType.RPAREN)
                 expr
             }
+            check(TokenType.LBRACE) -> {
+                // Lambda expression: { params -> body } or { body }
+                parseLambdaExpression()
+            }
             else -> throw EvaluationException("Unexpected token: ${current()}")
         }
+    }
+    
+    private fun parseLambdaExpression(): ExprNode {
+        expect(TokenType.LBRACE)
+        
+        // Check if there's a parameter list followed by ->
+        val parameters = mutableListOf<String>()
+        val savedPos = pos
+        
+        // Try to parse parameter list
+        try {
+            if (check(TokenType.IDENTIFIER)) {
+                parameters.add(advance().value as String)
+                while (match(TokenType.COMMA)) {
+                    if (check(TokenType.IDENTIFIER)) {
+                        parameters.add(advance().value as String)
+                    } else {
+                        throw EvaluationException("Expected parameter name")
+                    }
+                }
+                
+                if (!match(TokenType.ARROW)) {
+                    // Not a lambda with parameters, restore position
+                    pos = savedPos
+                    parameters.clear()
+                }
+            }
+        } catch (e: Exception) {
+            // Reset and try as a simple lambda without parameters
+            pos = savedPos
+            parameters.clear()
+        }
+        
+        // If no explicit parameters and ARROW not found, use implicit 'it'
+        if (parameters.isEmpty() && !check(TokenType.RBRACE)) {
+            // Check for arrow without parameters: { -> body }
+            if (match(TokenType.ARROW)) {
+                // No parameters explicitly declared
+            }
+        }
+        
+        // Parse body (or handle empty lambda)
+        val body = if (check(TokenType.RBRACE)) {
+            // Empty lambda body - treat as null
+            LiteralNode(null, TokenType.NULL)
+        } else {
+            parseExpression()
+        }
+        
+        expect(TokenType.RBRACE)
+        
+        return LambdaNode(parameters, body)
     }
     
     private fun parseIfExpression(): ExprNode {
