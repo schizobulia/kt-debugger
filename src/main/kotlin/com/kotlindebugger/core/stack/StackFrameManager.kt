@@ -197,7 +197,7 @@ class StackFrameManager(
                     if (sourceResult != null) {
                         // 如果映射的源文件名与当前位置的源文件名不同，说明是内联的
                         val currentSource = location.safeSourceName()
-                        if (currentSource != null && sourceResult.sourceFile != currentSource) {
+                        if (currentSource != null && !areSourceFilesEqual(sourceResult.sourceFile, currentSource)) {
                             return true
                         }
                     }
@@ -206,6 +206,27 @@ class StackFrameManager(
         }
         
         return false
+    }
+
+    /**
+     * 比较两个源文件名是否相等
+     * 标准化路径后进行比较，处理不同的路径分隔符和相对/绝对路径
+     */
+    private fun areSourceFilesEqual(file1: String, file2: String): Boolean {
+        // 精确匹配
+        if (file1 == file2) return true
+        
+        // 标准化路径分隔符并提取文件名
+        val normalized1 = file1.replace('\\', '/')
+        val normalized2 = file2.replace('\\', '/')
+        
+        if (normalized1 == normalized2) return true
+        
+        // 比较纯文件名（不含路径）
+        val name1 = normalized1.substringAfterLast('/')
+        val name2 = normalized2.substringAfterLast('/')
+        
+        return name1 == name2
     }
 
     /**

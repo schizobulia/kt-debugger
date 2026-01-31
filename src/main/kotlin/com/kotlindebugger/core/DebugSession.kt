@@ -92,10 +92,10 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
         // 从 DebugTarget 获取源代码根目录配置
         val sourceRootPaths = target.sourceRoots.map { Paths.get(it) }
         
-        // 创建 SourceViewer，配置源代码根目录和断点信息提供者
+        // 创建 SourceViewer，配置源代码根目录和断点查询器
         sourceViewer = SourceViewer(
             sourceRoots = sourceRootPaths,
-            breakpointInfoProvider = { fileName, line -> breakpointManager.hasBreakpointAt(fileName, line) }
+            breakpointChecker = { fileName, line -> breakpointManager.hasBreakpointAt(fileName, line) }
         )
         
         exceptionBreakpointManager = ExceptionBreakpointManager(vm)

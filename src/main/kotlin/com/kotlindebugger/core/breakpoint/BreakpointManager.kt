@@ -234,16 +234,44 @@ class BreakpointManager(
             val bp = entry.breakpoint
             bp.enabled && when (bp) {
                 is Breakpoint.LineBreakpoint -> {
-                    // 检查文件名是否匹配（考虑只匹配文件名或完整路径）
-                    val matches = bp.file == fileName ||
-                        bp.file.endsWith("/$fileName") ||
-                        bp.file.endsWith("\\$fileName") ||
-                        fileName.endsWith(bp.file)
+                    // 使用路径分隔符正确匹配文件名
+                    val matches = filesMatch(bp.file, fileName)
                     matches && bp.line == line
                 }
                 is Breakpoint.MethodBreakpoint -> false  // 方法断点不按行匹配
             }
         }
+    }
+
+    /**
+     * 检查两个文件路径是否匹配
+     * 支持完整路径匹配、纯文件名匹配和路径后缀匹配
+     */
+    private fun filesMatch(file1: String, file2: String): Boolean {
+        // 精确匹配
+        if (file1 == file2) return true
+        
+        // 标准化路径分隔符
+        val normalized1 = file1.replace('\\', '/')
+        val normalized2 = file2.replace('\\', '/')
+        
+        if (normalized1 == normalized2) return true
+        
+        // 提取纯文件名进行比较
+        val name1 = normalized1.substringAfterLast('/')
+        val name2 = normalized2.substringAfterLast('/')
+        
+        // 如果其中一个是纯文件名（不包含路径），则只比较文件名
+        if (!normalized1.contains('/') || !normalized2.contains('/')) {
+            return name1 == name2
+        }
+        
+        // 检查是否一个路径是另一个的后缀（必须是完整的路径组件）
+        if (normalized1.endsWith("/$name2") || normalized2.endsWith("/$name1")) {
+            return true
+        }
+        
+        return false
     }
 
     /**

@@ -6,10 +6,10 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
- * 断点信息提供者接口
+ * 断点查询接口
  * 用于检查指定文件和行是否有断点
  */
-fun interface BreakpointInfoProvider {
+fun interface BreakpointChecker {
     /**
      * 检查指定文件和行号是否设置了断点
      * @param fileName 源文件名
@@ -25,7 +25,7 @@ fun interface BreakpointInfoProvider {
  */
 class SourceViewer(
     private val sourceRoots: List<Path> = emptyList(),
-    private val breakpointInfoProvider: BreakpointInfoProvider? = null
+    private val breakpointChecker: BreakpointChecker? = null
 ) {
 
     /**
@@ -48,7 +48,7 @@ class SourceViewer(
                     lineNumber = lineNum,
                     content = lines[lineNum - 1],
                     isCurrentLine = lineNum == position.line,
-                    isBreakpoint = breakpointInfoProvider?.hasBreakpointAt(position.file, lineNum) ?: false
+                    isBreakpoint = breakpointChecker?.hasBreakpointAt(position.file, lineNum) ?: false
                 )
             }
 
