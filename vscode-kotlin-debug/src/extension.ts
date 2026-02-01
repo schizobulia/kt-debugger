@@ -10,8 +10,8 @@ let logChannel: vscode.OutputChannel;
 let logFileWatcher: fs.StatWatcher | undefined;
 let watchedLogFile: string | undefined;
 
-// 用于跟踪通过launch模式启动的应用进程
-let launchedAppProcess: cp.ChildProcess | undefined;
+// 用于跟踪通过launch模式启动的应用终端
+let activeTerminal: vscode.Terminal | undefined;
 
 // 状态栏项
 let statusBarItem: vscode.StatusBarItem;
@@ -400,13 +400,13 @@ async function debugMainFunction(args: { file: string, line: number }) {
 }
 
 /**
- * 停止通过launch模式启动的应用进程
+ * 停止通过launch模式启动的应用终端
  */
 function stopLaunchedApp() {
-    if (launchedAppProcess && !launchedAppProcess.killed) {
-        logChannel.appendLine('[Extension] Stopping launched application process...');
-        launchedAppProcess.kill();
-        launchedAppProcess = undefined;
+    if (activeTerminal) {
+        logChannel.appendLine('[Extension] Disposing debug terminal...');
+        activeTerminal.dispose();
+        activeTerminal = undefined;
     }
 }
 
@@ -595,78 +595,45 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
      * 启动用户的应用程序
      */
     private async launchApplication(config: vscode.DebugConfiguration, folder: vscode.WorkspaceFolder | undefined): Promise<boolean> {
-        const command = config.command as string;
+        const command = this.resolvePath(config.command as string, folder);
         const cwd = this.resolvePath(config.cwd || '${workspaceFolder}', folder);
         const env = config.env || {};
-        const preLaunchWait = config.preLaunchWait || 2000;
+        const preLaunchWait = config.preLaunchWait || 10000;
 
-        logChannel.appendLine(`[Extension] Launching application with command: ${command}`);
+        logChannel.appendLine(`[Extension] Launching application in terminal with command: ${command}`);
         logChannel.appendLine(`[Extension] Working directory: ${cwd}`);
         logChannel.appendLine(`[Extension] Pre-launch wait: ${preLaunchWait}ms`);
 
         try {
-            // 停止之前启动的进程
-            if (launchedAppProcess && !launchedAppProcess.killed) {
-                launchedAppProcess.kill();
+            // 停止之前的终端
+            if (activeTerminal) {
+                activeTerminal.dispose();
             }
 
-            // 启动用户的应用程序
-            launchedAppProcess = cp.spawn(command, [], {
+            // 创建新终端
+            const terminalOptions: vscode.TerminalOptions = {
+                name: 'Kotlin Debug Target',
                 cwd: cwd,
-                shell: true,
-                env: { ...process.env, ...env },
-                stdio: ['ignore', 'pipe', 'pipe']
-            });
+                env: env
+            };
 
-            // 捕获应用程序的输出
-            launchedAppProcess.stdout?.on('data', (data: Buffer) => {
-                const message = data.toString().trim();
-                if (message) {
-                    logChannel.appendLine(`[App STDOUT] ${message}`);
-                }
-            });
+            activeTerminal = vscode.window.createTerminal(terminalOptions);
+            activeTerminal.show(true);
 
-            launchedAppProcess.stderr?.on('data', (data: Buffer) => {
-                const message = data.toString().trim();
-                if (message) {
-                    logChannel.appendLine(`[App STDERR] ${message}`);
-                }
-            });
-
-            launchedAppProcess.on('exit', (code, signal) => {
-                if (code !== null && code !== 0) {
-                    logChannel.appendLine(`[Extension] Application exited with code: ${code}`);
-                } else if (signal) {
-                    logChannel.appendLine(`[Extension] Application was killed by signal: ${signal}`);
-                } else {
-                    logChannel.appendLine('[Extension] Application exited normally');
-                }
-                launchedAppProcess = undefined;
-            });
-
-            launchedAppProcess.on('error', (err) => {
-                logChannel.appendLine(`[Extension] Failed to start application: ${err.message}`);
-                vscode.window.showErrorMessage(`Failed to start application: ${err.message}`);
-            });
+            // 发送命令
+            activeTerminal.sendText(command);
 
             // 等待应用程序启动并开始监听调试端口
             logChannel.appendLine(`[Extension] Waiting for application to start and open debug port ${config.port}...`);
-            
+
             const port = config.port as number;
             const host = config.host || 'localhost';
-            const maxWaitTime = preLaunchWait;
+
             const checkInterval = 500;
-            const maxAttempts = Math.ceil(maxWaitTime / checkInterval);
-            
+            const maxAttempts = Math.ceil(preLaunchWait / checkInterval);
+
             let portReady = false;
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
-                // 检查进程是否仍在运行
-                if (!launchedAppProcess || launchedAppProcess.killed || launchedAppProcess.exitCode !== null) {
-                    const exitCode = launchedAppProcess?.exitCode ?? 'unknown';
-                    vscode.window.showErrorMessage(`Application exited prematurely with code: ${exitCode}`);
-                    return false;
-                }
-                
                 // 尝试连接到调试端口
                 const isPortOpen = await this.checkPort(host, port);
                 if (isPortOpen) {
@@ -674,10 +641,10 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
                     logChannel.appendLine(`[Extension] Debug port ${port} is now open`);
                     break;
                 }
-                
+
                 await new Promise(resolve => setTimeout(resolve, checkInterval));
             }
-            
+
             if (!portReady) {
                 logChannel.appendLine(`[Extension] Warning: Could not verify debug port ${port} is open, attempting to attach anyway...`);
             }
