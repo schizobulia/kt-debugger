@@ -154,22 +154,37 @@ class CommandProcessor(
             return CommandResult.Error("A debug session is already running.")
         }
 
-        val parts = args.split(":")
-        if (parts.size != 2) {
-            return CommandResult.Error("Usage: attach <host>:<port>")
+        // 解析参数：attach <host>:<port> [--no-suspend]
+        val parts = args.trim().split(Regex("\\s+"))
+        val noSuspend = parts.contains("--no-suspend")
+        val addressPart = parts.firstOrNull { !it.startsWith("--") }
+            ?: return CommandResult.Error("Usage: attach <host>:<port> [--no-suspend]")
+
+        val colonIdx = addressPart.lastIndexOf(':')
+        if (colonIdx < 0) {
+            return CommandResult.Error("Usage: attach <host>:<port> [--no-suspend]")
         }
 
-        val host = parts[0]
-        val port = parts[1].toIntOrNull() ?: return CommandResult.Error("Invalid port number")
+        val host = addressPart.substring(0, colonIdx)
+        val port = addressPart.substring(colonIdx + 1).toIntOrNull()
+            ?: return CommandResult.Error("Invalid port number")
+
+        val suspend = !noSuspend
 
         return try {
-            val target = DebugTarget.Attach(host, port)
+            val target = DebugTarget.Attach(host, port, suspend = suspend)
             val newSession = DebugSession(target)
             newSession.addListener(this)
             newSession.start()
 
             session = newSession
-            CommandResult.Message(formatter.success("Attached to $host:$port"))
+
+            if (suspend) {
+                CommandResult.Message(formatter.success("Attached to $host:$port (suspended)") + "\n" +
+                    formatter.info("VM is suspended. Set breakpoints with 'break <file>:<line>', then use 'continue' to start execution."))
+            } else {
+                CommandResult.Message(formatter.success("Attached to $host:$port"))
+            }
         } catch (e: Exception) {
             CommandResult.Error("Failed to attach to $host:$port: ${e.message}")
         }
@@ -186,9 +201,10 @@ class CommandProcessor(
             ${formatter.header("Kotlin Debugger Commands")}
 
             ${formatter.bold("Session:")}
-              run <class> [-cp path]  Launch a program
-              attach <host>:<port>    Attach to a remote JVM
-              quit, q                 Exit debugger
+              run <class> [-cp path]          Launch a program
+              attach <host>:<port>            Attach to a remote JVM (suspends VM by default)
+              attach <host>:<port> --no-suspend  Attach without suspending
+              quit, q                         Exit debugger
 
             ${formatter.bold("Breakpoints:")}
               break, b <file>:<line>  Set breakpoint
@@ -324,9 +340,13 @@ class CommandProcessor(
             return CommandResult.Error("Program is not suspended")
         }
 
+        val wasAttachSuspend = s.isSuspendedOnAttach()
         s.resume()
-        // 程序继续执行，断点命中时会显示相关信息
-        return CommandResult.Success
+        return if (wasAttachSuspend) {
+            CommandResult.Message(formatter.info("Starting program execution..."))
+        } else {
+            CommandResult.Success
+        }
     }
 
     private fun cmdStep(): CommandResult {

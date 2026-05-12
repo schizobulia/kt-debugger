@@ -55,6 +55,9 @@ fun main() {
             input == "cond" -> {
                 testConditionalBreakpoint()
             }
+            input == "suspend-demo" -> {
+                testSuspendOnAttach()
+            }
             input == "help" || input == "?" -> {
                 printHelp()
             }
@@ -87,20 +90,21 @@ fun main() {
 fun printHelp() {
     println("""
         Available commands:
-          calc     - Test calculation with variables
-          list     - Test list operations
-          random   - Generate random numbers
-          inline   - Test simple inline function
-          nested   - Test nested inline functions
-          reified  - Test inline functions with reified types
-          complex  - Test complex inline scenarios
-          lambda   - Test lambda expressions
-          loop     - Test loop with counter
-          eval     - Test expression evaluation (debug console/watch)
-          cond     - Test conditional breakpoints
-          add X Y  - Add two numbers
-          help     - Show this help
-          quit     - Exit program
+          calc         - Test calculation with variables
+          list         - Test list operations
+          random       - Generate random numbers
+          inline       - Test simple inline function
+          nested       - Test nested inline functions
+          reified      - Test inline functions with reified types
+          complex      - Test complex inline scenarios
+          lambda       - Test lambda expressions
+          loop         - Test loop with counter
+          eval         - Test expression evaluation (debug console/watch)
+          cond         - Test conditional breakpoints
+          suspend-demo - Demo for suspend-on-attach: run early init code (set breakpoints before this)
+          add X Y      - Add two numbers
+          help         - Show this help
+          quit         - Exit program
     """.trimIndent())
 }
 
@@ -476,8 +480,6 @@ fun testEvaluateExpression() {
 }
 
 // 测试用数据类
-data class Person(val name: String, val age: Int)
-
 data class Student(val name: String, val age: Int, val major: String)
 
 data class Company(val name: String, val employees: List<Person>)
@@ -589,4 +591,54 @@ fun testConditionalBreakpoint() {
     println()
     
     println("=== Conditional Breakpoint Test Complete ===")
+}
+
+/**
+ * Suspend-on-Attach 演示
+ *
+ * 用法 (演示如何在程序启动时捕获断点):
+ *   1. 启动此程序并开启 JDWP 且 suspend=y:
+ *      java -agentlib:jdwp:transport=dt_socket,server=y,suspend=y,address=5005 -cp InteractiveTest.jar InteractiveTestKt
+ *   2. 在另一个终端运行 kdb:
+ *      kdb attach localhost:5005
+ *   3. VM 会暂停。在 kdb 中设置断点:
+ *      (kdb) break InteractiveTest.kt:648
+ *   4. 继续执行:
+ *      (kdb) continue
+ *   程序将从第一行开始运行并在断点处停止，让你检查早期初始化逻辑。
+ */
+fun testSuspendOnAttach() {
+    println("=== Suspend-On-Attach Demo ===")
+    println("This function simulates early initialization code that you want to debug.")
+    println()
+
+    // 早期初始化阶段 - 这些代码在 main() 之后立刻执行，用户需要在这里设置断点
+    val config = mutableMapOf<String, String>()  // 断点: 在 attach 后暂停，用户可在此设置断点
+    config["version"] = "1.0"
+    config["mode"] = "debug"
+    config["maxRetries"] = "3"
+
+    println("Phase 1: Configuration loaded")
+    config.forEach { (k, v) -> println("  $k = $v") }
+    println()
+
+    // 第二阶段 - 数据初始化
+    val dataStore = mutableListOf<Int>()
+    for (i in 1..5) {
+        dataStore.add(i * i)  // 断点: 检查每次循环时 dataStore 的状态
+    }
+
+    println("Phase 2: Data store initialized: $dataStore")
+    println()
+
+    // 第三阶段 - 处理
+    val sum = dataStore.sum()
+    val average = sum.toDouble() / dataStore.size  // 断点: 检查 sum 和 average
+
+    println("Phase 3: Processing complete")
+    println("  Sum = $sum, Average = $average")
+    println()
+
+    println("=== Suspend-On-Attach Demo Complete ===")
+    println("Tip: Start this program with suspend=y and attach kdb to debug from the very first line.")
 }

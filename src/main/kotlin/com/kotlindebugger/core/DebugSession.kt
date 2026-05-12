@@ -67,6 +67,10 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
     private var currentThread: ThreadReference? = null
     private var currentFrameIndex: Int = 0
 
+    // 标记是否处于 attach 后的初始暂停状态（等待用户设置断点）
+    @Volatile
+    private var suspendedOnAttach: Boolean = false
+
     // 用于等待事件的锁
     private var eventLatch: CountDownLatch? = null
     private var lastEvent: DebugEvent? = null
@@ -109,11 +113,42 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
         stackFrameManager.initializeInlineSupport()
         breakpointManager.initializeInlineSupport()
 
+        // 检查是否需要 suspend-on-attach 模式
+        val shouldSuspendOnAttach = when (target) {
+            is DebugTarget.Attach -> target.suspend
+            is DebugTarget.AttachPid -> target.suspend
+            else -> false
+        }
+
+        if (shouldSuspendOnAttach) {
+            // 阻止 VMStartEvent 的 eventSet.resume()，保持 VM 暂停
+            eventHandler.keepVMStartSuspended = true
+        }
+
         // 注册事件监听
         eventHandler.addListener(this)
         eventHandler.start()
 
-        state.set(SessionState.RUNNING)
+        if (shouldSuspendOnAttach) {
+            // 检查 VM 是否正在运行（started with suspend=n）
+            // 如果 VM 以 suspend=y 启动，线程已暂停（suspendCount > 0）；否则需要手动暂停
+            val isRunning = try {
+                vm.allThreads().none { it.suspendCount() > 0 }
+            } catch (e: Exception) {
+                true // 无法检查时，假设需要手动暂停
+            }
+
+            if (isRunning) {
+                // VM 以 suspend=n 启动，正在运行，需要手动暂停
+                vm.suspend()
+            }
+
+            suspendedOnAttach = true
+            state.set(SessionState.SUSPENDED)
+            currentThread = stackFrameManager.getFirstSuspendedThread()
+        } else {
+            state.set(SessionState.RUNNING)
+        }
     }
 
     /**
@@ -168,10 +203,16 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
             return
         }
 
+        suspendedOnAttach = false
         vm.resume()
         state.set(SessionState.RUNNING)
         currentThread = null
     }
+
+    /**
+     * 是否处于 attach 后的初始暂停状态
+     */
+    fun isSuspendedOnAttach(): Boolean = suspendedOnAttach
 
     /**
      * 强制继续执行（跳过状态检查）
@@ -580,11 +621,20 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
     override fun onEvent(event: DebugEvent) {
         when (event) {
             is DebugEvent.VMStarted -> {
-                // VM started, if suspend=false, ensure it's running
-                val launchTarget = target as? DebugTarget.Launch
-                if (launchTarget?.suspend != true) {
-                    // VM should be running, not suspended
-                    vm.resume()
+                if (suspendedOnAttach) {
+                    // Suspend-on-attach 模式：保持 VM 暂停，让用户设置断点
+                    state.set(SessionState.SUSPENDED)
+                    // 尝试选取主线程作为当前线程
+                    if (currentThread == null) {
+                        currentThread = vm.allThreads().find { it.name() == "main" }
+                            ?: stackFrameManager.getFirstSuspendedThread()
+                    }
+                } else {
+                    // 正常 Launch 流程：如果 suspend=false 则自动恢复
+                    val launchTarget = target as? DebugTarget.Launch
+                    if (launchTarget?.suspend != true) {
+                        vm.resume()
+                    }
                 }
             }
 

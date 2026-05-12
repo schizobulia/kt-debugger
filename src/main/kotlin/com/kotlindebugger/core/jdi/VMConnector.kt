@@ -33,6 +33,7 @@ sealed class DebugTarget {
     data class Attach(
         val host: String = "localhost",
         val port: Int,
+        val suspend: Boolean = true,
         override val sourceRoots: List<String> = emptyList()
     ) : DebugTarget()
 
@@ -41,6 +42,7 @@ sealed class DebugTarget {
      */
     data class AttachPid(
         val pid: Long,
+        val suspend: Boolean = true,
         override val sourceRoots: List<String> = emptyList()
     ) : DebugTarget()
 }

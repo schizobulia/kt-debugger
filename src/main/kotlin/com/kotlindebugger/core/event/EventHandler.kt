@@ -36,6 +36,13 @@ class EventHandler(private val vm: VirtualMachine) {
     private val running = AtomicBoolean(false)
     private var eventThread: Thread? = null
 
+    /**
+     * 当设置为 true 时，VMStartEvent 不会自动 resume VM。
+     * 用于 suspend-on-attach 模式，让用户在执行开始前设置断点。
+     */
+    @Volatile
+    var keepVMStartSuspended: Boolean = false
+
     // 断点 ID 和条件映射 (BreakpointRequest -> BreakpointInfo)
     private val breakpointMap = ConcurrentHashMap<BreakpointRequest, BreakpointInfo>()
     
@@ -249,7 +256,7 @@ class EventHandler(private val vm: VirtualMachine) {
             is DebugEvent.BreakpointHit -> true
             is DebugEvent.StepCompleted -> true
             is DebugEvent.ExceptionThrown -> true
-            is DebugEvent.VMStarted -> false  // VM 启动时保持暂停，让调用者决定何时 resume
+            is DebugEvent.VMStarted -> keepVMStartSuspended  // 由调用方决定是否继续
             is DebugEvent.ClassPrepared -> false // 类加载时不暂停，DebugSession 会处理 resume
             else -> false
         }

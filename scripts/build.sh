@@ -274,13 +274,14 @@ if [ -d "test-program" ]; then
         # 创建test-program的build目录
         mkdir -p test-program/build
 
-        # 编译InteractiveTest.kt
-        if kotlinc -cp "$JAR_FILE" test-program/InteractiveTest.kt -d test-program/build -include-runtime -d test-program/InteractiveTest.jar 2>/dev/null; then
-            print_success "测试程序编译成功"
+        # 编译InteractiveTest.kt（保留调试信息，确保断点可用）
+        if kotlinc test-program/InteractiveTest.kt -include-runtime -d test-program/InteractiveTest.jar; then
+            print_success "测试程序编译成功: test-program/InteractiveTest.jar"
             cp test-program/InteractiveTest.jar "$RELEASE_DIR/"
             print_info "测试程序已复制到发布目录: $RELEASE_DIR/InteractiveTest.jar"
         else
-            print_warning "测试程序编译失败，请确保kotlinc可用"
+            print_warning "测试程序编译失败，请确保 kotlinc 已安装并在 PATH 中"
+            print_info "手动编译命令: kotlinc test-program/InteractiveTest.kt -include-runtime -d test-program/InteractiveTest.jar"
         fi
     fi
 fi
