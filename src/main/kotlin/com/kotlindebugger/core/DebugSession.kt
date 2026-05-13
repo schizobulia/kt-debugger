@@ -249,8 +249,8 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
     /**
      * 添加行断点
      */
-    fun addBreakpoint(file: String, line: Int, condition: String? = null): Breakpoint {
-        return breakpointManager.addLineBreakpoint(file, line, condition)
+    fun addBreakpoint(file: String, line: Int, condition: String? = null, logMessage: String? = null): Breakpoint {
+        return breakpointManager.addLineBreakpoint(file, line, condition, logMessage)
     }
 
     /**

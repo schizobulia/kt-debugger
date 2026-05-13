@@ -74,6 +74,45 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('kotlin-debug.showDebugMenu', showDebugMenu)
     );
 
+    // 注册协程视图
+    const coroutineViewProvider = new CoroutineViewProvider();
+    context.subscriptions.push(
+        vscode.window.registerTreeDataProvider('kotlin-debug.coroutinesView', coroutineViewProvider)
+    );
+
+    // 注册协程视图刷新命令
+    context.subscriptions.push(
+        vscode.commands.registerCommand('kotlin-debug.refreshCoroutines', () => {
+            coroutineViewProvider.fetchAndRefresh();
+        })
+    );
+
+    // 注册协程栈帧跳转命令
+    context.subscriptions.push(
+        vscode.commands.registerCommand('kotlin-debug.coroutine.openFrame',
+            async (frame: { file?: string; line?: number }) => {
+                if (!frame.file || !frame.line) { return; }
+                const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                if (!workspaceFolder) { return; }
+                // 在源码路径中查找文件
+                const uris = await vscode.workspace.findFiles(`**/${frame.file}`, '**/build/**', 1);
+                if (uris.length > 0) {
+                    const doc = await vscode.workspace.openTextDocument(uris[0]);
+                    const editor = await vscode.window.showTextDocument(doc);
+                    const pos = new vscode.Position(frame.line - 1, 0);
+                    editor.selection = new vscode.Selection(pos, pos);
+                    editor.revealRange(new vscode.Range(pos, pos));
+                }
+            })
+    );
+
+    // 注册 Hot Code Replace 命令
+    context.subscriptions.push(
+        vscode.commands.registerCommand('kotlin-debug.hotCodeReplace', () => {
+            triggerHotCodeReplace();
+        })
+    );
+
     // 注册悬停提供者用于调试时显示变量值
     context.subscriptions.push(
         vscode.languages.registerHoverProvider(
@@ -98,6 +137,13 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // 监听调试停止事件（暂停时刷新协程视图）
+    context.subscriptions.push(
+        vscode.debug.onDidChangeActiveDebugSession(() => {
+            coroutineViewProvider.fetchAndRefresh();
+        })
+    );
+
     // 监听调试会话结束事件
     context.subscriptions.push(
         vscode.debug.onDidTerminateDebugSession((session) => {
@@ -107,6 +153,8 @@ export function activate(context: vscode.ExtensionContext) {
                 logChannel.appendLine('\n=== Debug Session Ended ===');
                 stopLogFileWatcher();
                 stopLaunchedApp();
+                // 清空协程视图
+                coroutineViewProvider.fetchAndRefresh();
             }
         })
     );
@@ -159,6 +207,11 @@ async function showDebugMenu() {
             detail: 'Launch a debug session using an existing launch.json configuration'
         },
         {
+            label: '$(sync) Hot Code Replace',
+            description: 'Reload modified classes into running JVM',
+            detail: 'Apply code changes without restarting the debug session'
+        },
+        {
             label: '$(output) Show Debug Logs',
             description: 'Open the debug output panel',
             detail: 'View detailed debugger logs'
@@ -184,6 +237,9 @@ async function showDebugMenu() {
             break;
         case '$(play) Start Debugging':
             await vscode.commands.executeCommand('workbench.action.debug.start');
+            break;
+        case '$(sync) Hot Code Replace':
+            await vscode.commands.executeCommand('kotlin-debug.hotCodeReplace');
             break;
         case '$(output) Show Debug Logs':
             logChannel.show(true);
@@ -1055,3 +1111,277 @@ class KotlinDebugHoverProvider implements vscode.HoverProvider {
         return undefined;
     }
 }
+
+// ==================== 协程视图 ====================
+
+/**
+ * 协程信息数据结构（与后端 CoroutineHandler 对应）
+ */
+interface CoroutineData {
+    id: number;
+    name: string;
+    state: string;
+    dispatcher: string;
+    description: string;
+    isSuspended: boolean;
+    isRunning: boolean;
+    stackFrames: Array<{
+        className: string;
+        methodName: string;
+        isCreationFrame: boolean;
+        file?: string;
+        line?: number;
+    }>;
+}
+
+/**
+ * 协程树节点
+ */
+class CoroutineTreeItem extends vscode.TreeItem {
+    constructor(
+        public readonly label: string,
+        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+        public readonly coroutine?: CoroutineData,
+        public readonly stackFrame?: CoroutineData['stackFrames'][0]
+    ) {
+        super(label, collapsibleState);
+    }
+}
+
+/**
+ * 协程视图数据提供者
+ * 通过 customRequest('getCoroutines') 获取协程数据
+ */
+class CoroutineViewProvider implements vscode.TreeDataProvider<CoroutineTreeItem> {
+    private _onDidChangeTreeData = new vscode.EventEmitter<CoroutineTreeItem | undefined | void>();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+    private coroutines: CoroutineData[] = [];
+    private statusMessage: string = '';
+    private probesInstalled: boolean = false;
+
+    refresh(): void {
+        this._onDidChangeTreeData.fire();
+    }
+
+    /**
+     * 从调试会话获取协程数据并刷新视图
+     */
+    async fetchAndRefresh(): Promise<void> {
+        const session = vscode.debug.activeDebugSession;
+        if (!session || session.type !== 'kotlin') {
+            this.coroutines = [];
+            this.statusMessage = '';
+            this.probesInstalled = false;
+            this.refresh();
+            return;
+        }
+
+        try {
+            const response = await session.customRequest('getCoroutines', {});
+            this.coroutines = response.coroutines || [];
+            this.probesInstalled = response.probesInstalled ?? false;
+            this.statusMessage = response.statusMessage || '';
+        } catch (e) {
+            this.coroutines = [];
+            this.statusMessage = 'Failed to fetch coroutines';
+        }
+        this.refresh();
+    }
+
+    getTreeItem(element: CoroutineTreeItem): vscode.TreeItem {
+        return element;
+    }
+
+    getChildren(element?: CoroutineTreeItem): CoroutineTreeItem[] {
+        if (!isDebugging) {
+            return [new CoroutineTreeItem('Not debugging', vscode.TreeItemCollapsibleState.None)];
+        }
+
+        if (!element) {
+            // 根节点：显示所有协程
+            if (this.coroutines.length === 0) {
+                const msg = this.probesInstalled
+                    ? 'No coroutines found'
+                    : (this.statusMessage || 'kotlinx-coroutines-debug not on classpath');
+                return [new CoroutineTreeItem(msg, vscode.TreeItemCollapsibleState.None)];
+            }
+            return this.coroutines.map(c => {
+                const hasFrames = c.stackFrames && c.stackFrames.length > 0;
+                const item = new CoroutineTreeItem(
+                    c.description,
+                    hasFrames ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+                    c
+                );
+                // 根据状态设置图标
+                item.iconPath = new vscode.ThemeIcon(
+                    c.isRunning ? 'debug-alt' : c.isSuspended ? 'debug-pause' : 'circle-outline'
+                );
+                item.tooltip = `ID: ${c.id}\nState: ${c.state}\nDispatcher: ${c.dispatcher || 'N/A'}`;
+                item.contextValue = 'coroutine';
+                return item;
+            });
+        }
+
+        // 子节点：协程的调用栈帧
+        if (element.coroutine) {
+            return (element.coroutine.stackFrames || []).map(frame => {
+                const label = `${lastPart(frame.className)}.${frame.methodName}()`;
+                const item = new CoroutineTreeItem(
+                    label,
+                    vscode.TreeItemCollapsibleState.None,
+                    undefined,
+                    frame
+                );
+                item.iconPath = new vscode.ThemeIcon('symbol-method');
+                if (frame.file && frame.line) {
+                    item.description = `${frame.file}:${frame.line}`;
+                    item.command = {
+                        command: 'kotlin-debug.coroutine.openFrame',
+                        title: 'Open File',
+                        arguments: [frame]
+                    };
+                }
+                return item;
+            });
+        }
+
+        return [];
+    }
+}
+
+/** 取类名最后一段（去掉包名前缀） */
+function lastPart(className: string): string {
+    const idx = className.lastIndexOf('.');
+    return idx >= 0 ? className.substring(idx + 1) : className;
+}
+
+// ==================== Hot Code Replace ====================
+
+/**
+ * 触发 Hot Code Replace
+ * 扫描工作区的 .class 文件并发送 redefineClasses 请求
+ */
+async function triggerHotCodeReplace(outputFiles?: string[]): Promise<void> {
+    const session = vscode.debug.activeDebugSession;
+    if (!session || session.type !== 'kotlin') {
+        vscode.window.showWarningMessage('No active Kotlin debug session');
+        return;
+    }
+
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+        return;
+    }
+
+    // 查找 .class 文件（如果没有指定，则扫描 build/classes）
+    let classFiles: string[];
+    if (outputFiles && outputFiles.length > 0) {
+        classFiles = outputFiles;
+    } else {
+        const buildDirs = [
+            path.join(workspaceFolder.uri.fsPath, 'build', 'classes'),
+            path.join(workspaceFolder.uri.fsPath, 'out'),
+            path.join(workspaceFolder.uri.fsPath, 'target', 'classes')
+        ];
+        classFiles = [];
+        for (const dir of buildDirs) {
+            if (fs.existsSync(dir)) {
+                collectClassFiles(dir, classFiles);
+            }
+        }
+    }
+
+    if (classFiles.length === 0) {
+        vscode.window.showWarningMessage('No .class files found. Please build the project first.');
+        return;
+    }
+
+    // 构建 redefineClasses 请求：将 .class 文件路径转换为类名
+    const classes = classFiles.map(filePath => {
+        // 推断类名：从 build/classes/kotlin/main/ 或 out/ 后的路径
+        const className = inferClassName(filePath, workspaceFolder.uri.fsPath);
+        return { className, classFile: filePath };
+    }).filter(c => c.className);
+
+    if (classes.length === 0) {
+        vscode.window.showWarningMessage('Could not infer class names from .class files');
+        return;
+    }
+
+    logChannel.appendLine(`[HCR] Triggering hot code replace for ${classes.length} class(es)...`);
+
+    try {
+        const result = await session.customRequest('redefineClasses', { classes });
+        if (result.success) {
+            const count = result.reloadedClasses?.length || 0;
+            vscode.window.setStatusBarMessage(`$(check) Hot Replaced ${count} class(es)`, 3000);
+            logChannel.appendLine(`[HCR] Success: ${result.message}`);
+        } else {
+            vscode.window.showWarningMessage(`Hot Code Replace failed: ${result.message}`);
+            logChannel.appendLine(`[HCR] Failed: ${result.message}`);
+        }
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logChannel.appendLine(`[HCR] Error: ${msg}`);
+        vscode.window.showErrorMessage(`Hot Code Replace error: ${msg}`);
+    }
+}
+
+/**
+ * 递归收集目录下的所有 .class 文件
+ */
+function collectClassFiles(dir: string, result: string[]): void {
+    try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                collectClassFiles(fullPath, result);
+            } else if (entry.isFile() && entry.name.endsWith('.class')) {
+                result.push(fullPath);
+            }
+        }
+    } catch {
+        // 忽略无法访问的目录
+    }
+}
+
+/**
+ * 从 .class 文件路径推断全限定类名
+ */
+function inferClassName(classFile: string, workspaceRoot: string): string {
+    // 标准化路径分隔符
+    const normalized = classFile.replace(/\\/g, '/');
+    const wsNorm = workspaceRoot.replace(/\\/g, '/');
+
+    // 尝试从常见目录结构中提取包路径
+    const markers = [
+        '/build/classes/kotlin/main/',
+        '/build/classes/kotlin/test/',
+        '/build/classes/java/main/',
+        '/out/production/',
+        '/target/classes/'
+    ];
+
+    for (const marker of markers) {
+        const idx = normalized.indexOf(marker);
+        if (idx >= 0) {
+            const relative = normalized.substring(idx + marker.length);
+            return relative.replace(/\.class$/, '').replace(/\//g, '.').replace(/\$/g, '$');
+        }
+    }
+
+    // 尝试从工作区根路径推断
+    if (normalized.startsWith(wsNorm)) {
+        const parts = normalized.substring(wsNorm.length + 1).split('/');
+        // 找到 classes 或 out 目录后的部分
+        const classesIdx = parts.findIndex(p => p === 'classes' || p === 'out' || p === 'target');
+        if (classesIdx >= 0) {
+            return parts.slice(classesIdx + 1).join('.').replace(/\.class$/, '');
+        }
+    }
+
+    return '';
+}
+

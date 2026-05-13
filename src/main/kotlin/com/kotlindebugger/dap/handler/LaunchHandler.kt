@@ -59,6 +59,11 @@ internal class DebugEventDispatcher(private val server: DAPServer) {
                 Logger.info("Hot code replace failed: ${event.errorMessage}")
                 server.eventEmitter.sendHotCodeReplaceFailed(event.errorMessage, event.failedClasses)
             }
+            is DebugEvent.LogpointHit -> {
+                // Logpoint 命中：输出日志消息，不暂停执行
+                Logger.info("Logpoint hit: ${event.message}")
+                server.eventEmitter.sendOutput("${event.message}\n", "console")
+            }
             else -> {
                 Logger.debug("Unhandled debug event: $event")
             }

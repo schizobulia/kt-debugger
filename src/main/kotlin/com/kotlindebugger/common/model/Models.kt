@@ -29,11 +29,14 @@ sealed class Breakpoint {
         val line: Int,
         override val enabled: Boolean = true,
         override val condition: String? = null,
-        override val hitCount: Int = 0
+        override val hitCount: Int = 0,
+        // Logpoint 消息模板（命中时打印日志而非暂停，支持 {expr} 插值）
+        val logMessage: String? = null
     ) : Breakpoint() {
         override fun toString(): String = "Breakpoint #$id at $file:$line" +
                 (if (!enabled) " (disabled)" else "") +
-                (if (condition != null) " if ($condition)" else "")
+                (if (condition != null) " if ($condition)" else "") +
+                (if (logMessage != null) " log: $logMessage" else "")
     }
 
     data class MethodBreakpoint(
@@ -195,5 +198,14 @@ sealed class DebugEvent {
     data class HotCodeReplaceFailed(
         val errorMessage: String,
         val failedClasses: List<String>
+    ) : DebugEvent()
+
+    /**
+     * Logpoint 命中事件（打印日志，不暂停执行）
+     */
+    data class LogpointHit(
+        val message: String,
+        val threadId: Long,
+        val location: SourcePosition?
     ) : DebugEvent()
 }

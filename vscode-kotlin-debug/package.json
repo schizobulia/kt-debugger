@@ -50,13 +50,55 @@
         "command": "kotlin-debug.showDebugMenu",
         "title": "Kotlin Debug: Show Debug Menu",
         "category": "Kotlin Debug"
+      },
+      {
+        "command": "kotlin-debug.hotCodeReplace",
+        "title": "Kotlin Debug: Hot Code Replace",
+        "category": "Kotlin Debug",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "kotlin-debug.refreshCoroutines",
+        "title": "Kotlin Debug: Refresh Coroutines",
+        "category": "Kotlin Debug",
+        "icon": "$(refresh)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kotlin-debug-sidebar",
+          "title": "Kotlin Debug",
+          "icon": "$(debug)"
+        }
+      ]
+    },
+    "views": {
+      "debug": [
+        {
+          "id": "kotlin-debug.coroutinesView",
+          "name": "Kotlin Coroutines",
+          "when": "debugType == kotlin"
+        }
+      ]
+    },
     "menus": {
+      "view/title": [
+        {
+          "command": "kotlin-debug.refreshCoroutines",
+          "when": "view == kotlin-debug.coroutinesView",
+          "group": "navigation"
+        }
+      ],
       "editor/context": [
         {
           "command": "kotlin-debug.generateLaunchConfig",
           "when": "resourceLangId == kotlin",
+          "group": "debug"
+        },
+        {
+          "command": "kotlin-debug.hotCodeReplace",
+          "when": "inDebugMode && debugType == kotlin",
           "group": "debug"
         }
       ],
@@ -66,6 +108,14 @@
         },
         {
           "command": "kotlin-debug.showDebugMenu"
+        },
+        {
+          "command": "kotlin-debug.hotCodeReplace",
+          "when": "inDebugMode && debugType == kotlin"
+        },
+        {
+          "command": "kotlin-debug.refreshCoroutines",
+          "when": "inDebugMode && debugType == kotlin"
         },
         {
           "command": "kotlin-debug.debugMain",
@@ -107,6 +157,9 @@
     "breakpoints": [
       {
         "language": "kotlin"
+      },
+      {
+        "language": "kts"
       }
     ],
     "debuggers": [

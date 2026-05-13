@@ -27,6 +27,8 @@ class InitializeHandler : RequestHandler {
             supportsExceptionInfoRequest = true,
             supportsCompletionsRequest = true,
             supportsHotCodeReplace = true,
+            // 声明支持 Logpoints
+            supportsLogPoints = true,
             exceptionBreakpointFilters = listOf(
                 ExceptionBreakpointsFilter(
                     filter = "caught",

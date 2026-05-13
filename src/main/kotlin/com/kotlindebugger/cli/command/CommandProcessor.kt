@@ -6,6 +6,7 @@ import com.kotlindebugger.core.DebugSession
 import com.kotlindebugger.core.SessionState
 import com.kotlindebugger.core.coroutine.CoroutineState
 import com.kotlindebugger.core.event.DebugEventListener
+import com.kotlindebugger.core.hotswap.HotCodeReplaceResult
 import com.kotlindebugger.core.jdi.DebugTarget
 import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -84,6 +85,8 @@ class CommandProcessor(
                 "thread", "t" -> cmdThread(args)
 
                 "coroutines" -> cmdCoroutines()
+
+                "hotswap", "hcr" -> cmdHotSwap(args)
 
                 "list", "l" -> cmdListBreakpoints()
 
@@ -207,7 +210,9 @@ class CommandProcessor(
               quit, q                         Exit debugger
 
             ${formatter.bold("Breakpoints:")}
-              break, b <file>:<line>  Set breakpoint
+              break, b <file>:<line>                  Set breakpoint
+              break, b <file>:<line> --log "msg"      Set logpoint (print log, no pause)
+              break, b <file>:<line> --cond "expr"    Set conditional breakpoint
               delete, d <id>          Delete breakpoint
               list, l                 List breakpoints
               enable <id>             Enable breakpoint
@@ -237,6 +242,10 @@ class CommandProcessor(
             ${formatter.bold("Coroutines:")}
               coroutines              List all coroutines
 
+            ${formatter.bold("Hot Code Replace:")}
+              hotswap, hcr <file.class>                   Redefine class from .class file
+              hotswap --class <ClassName> <file.class>    Specify class name explicitly
+
             ${formatter.bold("Info:")}
               status                  Show session status
               help, h                 Show this help
@@ -250,18 +259,42 @@ class CommandProcessor(
     private fun cmdBreakpoint(args: String): CommandResult {
         val s = session ?: return CommandResult.Error("No active debug session")
 
-        // 解析 file:line 格式
-        val colonIndex = args.lastIndexOf(':')
-        if (colonIndex < 0) {
-            return CommandResult.Error("Usage: break <file>:<line>")
+        // 解析选项：break <file>:<line> [--log "message"] [--cond "expr"]
+        // 先提取 --log 和 --cond 选项
+        var remaining = args.trim()
+        var logMessage: String? = null
+        var condition: String? = null
+
+        // 解析 --log "..." 选项（Logpoint）
+        val logRegex = Regex("""--log\s+\"([^\"]*)\"""")
+        logRegex.find(remaining)?.let { m ->
+            logMessage = m.groupValues[1]
+            remaining = remaining.removeRange(m.range).trim()
         }
 
-        val file = args.substring(0, colonIndex)
-        val line = args.substring(colonIndex + 1).toIntOrNull()
+        // 解析 --cond "..." 选项
+        val condRegex = Regex("""--cond\s+\"([^\"]*)\"""")
+        condRegex.find(remaining)?.let { m ->
+            condition = m.groupValues[1]
+            remaining = remaining.removeRange(m.range).trim()
+        }
+
+        // 解析 file:line
+        val colonIndex = remaining.lastIndexOf(':')
+        if (colonIndex < 0) {
+            return CommandResult.Error("Usage: break <file>:<line> [--log \"message\"] [--cond \"expr\"]")
+        }
+
+        val file = remaining.substring(0, colonIndex)
+        val line = remaining.substring(colonIndex + 1).toIntOrNull()
             ?: return CommandResult.Error("Invalid line number")
 
-        val bp = s.addBreakpoint(file, line)
-        return CommandResult.Message(formatter.success("Breakpoint ${bp.id} set at $file:$line"))
+        val bp = s.addBreakpoint(file, line, condition, logMessage)
+        return if (logMessage != null) {
+            CommandResult.Message(formatter.success("Logpoint ${bp.id} set at $file:$line") + " → log: $logMessage")
+        } else {
+            CommandResult.Message(formatter.success("Breakpoint ${bp.id} set at $file:$line"))
+        }
     }
 
     private fun cmdDelete(args: String): CommandResult {
@@ -291,7 +324,8 @@ class CommandProcessor(
                     bp.id.toString(),
                     "${bp.file}:${bp.line}",
                     if (bp.enabled) "enabled" else "disabled",
-                    bp.condition ?: ""
+                    // Logpoint 显示日志图标，普通断点显示条件
+                    if (bp.logMessage != null) "📝 ${bp.logMessage}" else (bp.condition ?: "")
                 )
                 is Breakpoint.MethodBreakpoint -> listOf(
                     bp.id.toString(),
@@ -303,7 +337,7 @@ class CommandProcessor(
         }
 
         val table = formatter.table(
-            listOf("ID", "Location", "Status", "Condition"),
+            listOf("ID", "Location", "Status", "Condition/Log"),
             rows
         )
         return CommandResult.Message(table)
@@ -583,7 +617,103 @@ class CommandProcessor(
         return CommandResult.Message(sb.toString())
     }
 
-    
+    // ==================== HotSwap 命令 ====================
+
+    /**
+     * 执行热代码替换 (Hot Code Replace / HCR)
+     *
+     * 用法:
+     *   hotswap <classFile1> <classFile2> ...     从文件路径重定义类
+     *   hotswap --class <className> <file>         指定类名和文件
+     *
+     * 示例:
+     *   hotswap build/classes/kotlin/main/com/example/MyClass.class
+     *   hotswap --class com.example.MyClass /path/to/MyClass.class
+     */
+    private fun cmdHotSwap(args: String): CommandResult {
+        val s = session ?: return CommandResult.Error("No active debug session")
+
+        if (!s.canRedefineClasses()) {
+            return CommandResult.Error(
+                "Hot code replace is not supported by this JVM. " +
+                "Restart with a DCEVM-enabled JVM or ensure JDWP supports class redefinition."
+            )
+        }
+
+        val trimmed = args.trim()
+        if (trimmed.isBlank()) {
+            return CommandResult.Error(
+                "Usage: hotswap <classFile.class> ...\n" +
+                "       hotswap --class <ClassName> <classFile.class>"
+            )
+        }
+
+        // 解析参数：支持 --class <ClassName> <file> 和直接提供 .class 文件
+        val classFiles = mutableMapOf<String, String>() // className -> filePath
+
+        if (trimmed.startsWith("--class ")) {
+            // 显式指定类名：--class com.example.MyClass /path/to/MyClass.class
+            val parts = trimmed.removePrefix("--class ").trim().split(Regex("\\s+"), limit = 2)
+            if (parts.size < 2) {
+                return CommandResult.Error("Usage: hotswap --class <ClassName> <classFile.class>")
+            }
+            classFiles[parts[0]] = parts[1]
+        } else {
+            // 从文件路径推断类名
+            trimmed.split(Regex("\\s+")).forEach { filePath ->
+                val className = inferClassNameFromPath(filePath)
+                if (className.isBlank()) {
+                    return CommandResult.Error(
+                        "Cannot infer class name from: $filePath\n" +
+                        "Use --class <ClassName> <file> to specify explicitly."
+                    )
+                }
+                classFiles[className] = filePath
+            }
+        }
+
+        val result = s.redefineClassesFromFiles(classFiles)
+        return when (result) {
+            is HotCodeReplaceResult.Success -> {
+                val msg = if (result.reloadedClasses.isEmpty()) {
+                    formatter.info(result.message)
+                } else {
+                    formatter.success("Hot code replace successful: ${result.reloadedClasses.joinToString()}")
+                }
+                CommandResult.Message(msg)
+            }
+            is HotCodeReplaceResult.Failure ->
+                CommandResult.Error("Hot code replace failed: ${result.errorMessage}")
+            is HotCodeReplaceResult.NotSupported ->
+                CommandResult.Error(result.reason)
+        }
+    }
+
+    /**
+     * 从 .class 文件路径推断全限定类名
+     * 支持常见构建目录约定（Gradle、Maven）
+     */
+    private fun inferClassNameFromPath(filePath: String): String {
+        val normalized = filePath.replace('\\', '/')
+        val markers = listOf(
+            "/build/classes/kotlin/main/",
+            "/build/classes/kotlin/test/",
+            "/build/classes/java/main/",
+            "/out/production/",
+            "/target/classes/"
+        )
+        for (marker in markers) {
+            val idx = normalized.indexOf(marker)
+            if (idx >= 0) {
+                return normalized.substring(idx + marker.length)
+                    .removeSuffix(".class")
+                    .replace('/', '.')
+            }
+        }
+        // 最后尝试：直接用文件名（去掉 .class 和 $ 后的部分）
+        return java.io.File(filePath).nameWithoutExtension
+    }
+
     // ==================== 信息命令 ====================
 
     private fun cmdStatus(): CommandResult {

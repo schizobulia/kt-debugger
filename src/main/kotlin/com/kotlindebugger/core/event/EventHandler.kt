@@ -12,11 +12,13 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 断点信息（包含条件）
+ * 断点信息（包含条件和日志消息）
  */
 data class BreakpointInfo(
     val id: Int,
-    val condition: String?
+    val condition: String?,
+    // Logpoint 消息模板（null 表示普通断点）
+    val logMessage: String? = null
 )
 
 /**
@@ -68,9 +70,10 @@ class EventHandler(private val vm: VirtualMachine) {
      * @param request JDI 断点请求
      * @param breakpointId 断点 ID
      * @param condition 条件表达式（可选）
+     * @param logMessage Logpoint 消息模板（可选）
      */
-    fun registerBreakpoint(request: BreakpointRequest, breakpointId: Int, condition: String? = null) {
-        breakpointMap[request] = BreakpointInfo(breakpointId, condition)
+    fun registerBreakpoint(request: BreakpointRequest, breakpointId: Int, condition: String? = null, logMessage: String? = null) {
+        breakpointMap[request] = BreakpointInfo(breakpointId, condition, logMessage)
     }
 
     /**
@@ -174,6 +177,7 @@ class EventHandler(private val vm: VirtualMachine) {
                 val breakpointInfo = breakpointMap[event.request()]
                 val breakpointId = breakpointInfo?.id ?: -1
                 val condition = breakpointInfo?.condition
+                val logMessage = breakpointInfo?.logMessage
                 
                 // 评估条件断点
                 if (condition != null && condition.isNotBlank()) {
@@ -188,6 +192,16 @@ class EventHandler(private val vm: VirtualMachine) {
                         // 条件不满足，返回 null 让程序继续运行
                         return null
                     }
+                }
+                
+                // 处理 Logpoint（有 logMessage 时打印日志而非暂停）
+                if (logMessage != null) {
+                    val resolvedMessage = resolveLogpointMessage(logMessage, event.thread())
+                    return DebugEvent.LogpointHit(
+                        message = resolvedMessage,
+                        threadId = event.thread().uniqueID(),
+                        location = createSourcePosition(location)
+                    )
                 }
                 
                 val bp = Breakpoint.LineBreakpoint(
@@ -258,7 +272,80 @@ class EventHandler(private val vm: VirtualMachine) {
             is DebugEvent.ExceptionThrown -> true
             is DebugEvent.VMStarted -> keepVMStartSuspended  // 由调用方决定是否继续
             is DebugEvent.ClassPrepared -> false // 类加载时不暂停，DebugSession 会处理 resume
+            is DebugEvent.LogpointHit -> false // Logpoint 命中时不暂停，只打印日志
             else -> false
+        }
+    }
+
+    /**
+     * 解析 Logpoint 消息中的 {expr} 占位符
+     * 将 {varName} 替换为本地变量的实际值
+     */
+    private fun resolveLogpointMessage(template: String, thread: ThreadReference): String {
+        val result = StringBuilder()
+        var i = 0
+        while (i < template.length) {
+            if (template[i] == '{') {
+                val end = template.indexOf('}', i)
+                if (end > i) {
+                    val expr = template.substring(i + 1, end).trim()
+                    val value = evaluateExprToString(expr, thread)
+                    result.append(value)
+                    i = end + 1
+                } else {
+                    result.append(template[i])
+                    i++
+                }
+            } else {
+                result.append(template[i])
+                i++
+            }
+        }
+        return result.toString()
+    }
+
+    /**
+     * 将表达式求值为字符串（用于 Logpoint 输出）
+     * 支持本地变量、字段和简单属性访问
+     */
+    private fun evaluateExprToString(expr: String, thread: ThreadReference): String {
+        return try {
+            val frame = thread.frame(0)
+            // 先尝试局部变量
+            val localVars = frame.visibleVariables()
+            val localVar = localVars.find { it.name() == expr }
+            if (localVar != null) {
+                return valueToString(frame.getValue(localVar))
+            }
+            // 尝试 this.field
+            val thisObj = frame.thisObject()
+            if (thisObj != null) {
+                val field = thisObj.referenceType().fieldByName(expr)
+                if (field != null) {
+                    return valueToString(thisObj.getValue(field))
+                }
+            }
+            // 无法求值，返回原始表达式
+            "{$expr}"
+        } catch (e: Exception) {
+            "{$expr}"
+        }
+    }
+
+    /**
+     * 将 JDI Value 转换为字符串
+     */
+    private fun valueToString(value: com.sun.jdi.Value?): String {
+        return when (value) {
+            null -> "null"
+            is com.sun.jdi.StringReference -> value.value()
+            is com.sun.jdi.PrimitiveValue -> value.toString()
+            is com.sun.jdi.ObjectReference -> {
+                // 使用类型名+id作为简单显示（避免在事件线程中调用toString()引发死锁）
+                val typeName = value.referenceType().name().substringAfterLast('.')
+                "$typeName@${value.uniqueID()}"
+            }
+            else -> value.toString()
         }
     }
 

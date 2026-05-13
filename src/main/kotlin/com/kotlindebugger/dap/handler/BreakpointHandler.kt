@@ -41,10 +41,12 @@ class SetBreakpointsHandler(private val server: DAPServer) : RequestHandler {
             
             // 解析条件表达式（VSCode DAP协议）
             val condition = bp.jsonObject["condition"]?.jsonPrimitive?.contentOrNull
+            // 解析 logMessage（Logpoints: 命中时打印日志而非暂停）
+            val logMessage = bp.jsonObject["logMessage"]?.jsonPrimitive?.contentOrNull
 
             try {
-                // 使用文件名进行JDI断点设置，传递条件表达式
-                val breakpoint = debugSession.addBreakpoint(fileName, line, condition)
+                // 使用文件名进行JDI断点设置，传递条件表达式和 logMessage
+                val breakpoint = debugSession.addBreakpoint(fileName, line, condition, logMessage)
                 Breakpoint(
                     id = breakpoint.id,
                     verified = true,

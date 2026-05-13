@@ -89,5 +89,7 @@ data class Capabilities(
     val supportsExceptionInfoRequest: Boolean = false,
     val supportsCompletionsRequest: Boolean = false,
     val supportsHotCodeReplace: Boolean = false,
+    // 支持 Logpoints（带日志消息的断点，命中时打印日志而非暂停）
+    val supportsLogPoints: Boolean = false,
     val exceptionBreakpointFilters: List<ExceptionBreakpointsFilter>? = null
 )

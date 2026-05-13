@@ -98,7 +98,9 @@ class BreakpointManager(
     private data class PendingBreakpoint(
         val breakpointId: Int,
         val line: Int,
-        val condition: String?
+        val condition: String?,
+        // Logpoint 消息模板
+        val logMessage: String? = null
     )
 
     /**
@@ -106,16 +108,18 @@ class BreakpointManager(
      * @param file 源文件名（如 Main.kt）
      * @param line 行号
      * @param condition 条件表达式（可选）
+     * @param logMessage Logpoint 消息模板（可选，设置后命中时打印日志而非暂停）
      * @return 创建的断点，如果无法创建则返回 null
      */
-    fun addLineBreakpoint(file: String, line: Int, condition: String? = null): Breakpoint {
+    fun addLineBreakpoint(file: String, line: Int, condition: String? = null, logMessage: String? = null): Breakpoint {
         val id = nextId.getAndIncrement()
         val breakpoint = Breakpoint.LineBreakpoint(
             id = id,
             file = file,
             line = line,
             enabled = true,
-            condition = condition
+            condition = condition,
+            logMessage = logMessage
         )
 
         val entry = BreakpointEntry(breakpoint)
@@ -126,7 +130,7 @@ class BreakpointManager(
 
         if (!classesSet) {
             // 如果没有找到匹配的类，添加到待处理列表
-            addPendingBreakpoint(file, id, line, condition)
+            addPendingBreakpoint(file, id, line, condition, logMessage)
         }
 
         return breakpoint
@@ -341,8 +345,9 @@ class BreakpointManager(
 
         val entry = breakpoints[breakpointId] ?: return false
         
-        // 获取断点条件
+        // 获取断点条件和 Logpoint 消息
         val condition = entry.breakpoint.condition
+        val logMessage = (entry.breakpoint as? Breakpoint.LineBreakpoint)?.logMessage
 
         for (location in locations) {
             try {
@@ -351,8 +356,8 @@ class BreakpointManager(
                 request.enable()
 
                 entry.requests.add(request)
-                // 传递条件信息给事件处理器
-                eventHandler.registerBreakpoint(request, breakpointId, condition)
+                // 传递条件和 logMessage 信息给事件处理器
+                eventHandler.registerBreakpoint(request, breakpointId, condition, logMessage)
             } catch (e: Exception) {
                 System.err.println("Failed to create breakpoint request: ${e.message}")
             }
@@ -396,9 +401,9 @@ class BreakpointManager(
     /**
      * 添加待处理断点
      */
-    private fun addPendingBreakpoint(file: String, breakpointId: Int, line: Int, condition: String?) {
+    private fun addPendingBreakpoint(file: String, breakpointId: Int, line: Int, condition: String?, logMessage: String? = null) {
         pendingBreakpoints.computeIfAbsent(file) { mutableListOf() }
-            .add(PendingBreakpoint(breakpointId, line, condition))
+            .add(PendingBreakpoint(breakpointId, line, condition, logMessage))
         // 全局 ClassPrepareRequest 已在初始化时设置，无需再次添加
     }
 

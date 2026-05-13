@@ -1,5 +1,6 @@
 import java.util.Scanner
 import kotlin.random.Random
+import kotlinx.coroutines.*
 
 /**
  * 交互式调试测试程序
@@ -7,7 +8,7 @@ import kotlin.random.Random
  */
 fun main() {
     println("=== Kotlin Debug Test Program ===")
-    println("Commands: calc, list, random, inline, nested, reified, lambda, loop, eval, cond, quit")
+    println("Commands: calc, list, random, inline, nested, reified, lambda, loop, eval, cond, coroutines, logpoint, quit")
     println()
 
     val scanner = Scanner(System.`in`)
@@ -58,6 +59,15 @@ fun main() {
             input == "suspend-demo" -> {
                 testSuspendOnAttach()
             }
+            input == "coroutines" -> {
+                testCoroutinesView()
+            }
+            input == "logpoint" -> {
+                testLogpoint()
+            }
+            input == "hcr" -> {
+                testHotCodeReplace()
+            }
             input == "help" || input == "?" -> {
                 printHelp()
             }
@@ -101,6 +111,9 @@ fun printHelp() {
           loop         - Test loop with counter
           eval         - Test expression evaluation (debug console/watch)
           cond         - Test conditional breakpoints
+          coroutines   - Test coroutine view panel (multiple coroutines)
+          logpoint     - Test logpoints (set logpoints in VS Code)
+          hcr          - Test hot code replace (modify & reload classes)
           suspend-demo - Demo for suspend-on-attach: run early init code (set breakpoints before this)
           add X Y      - Add two numbers
           help         - Show this help
@@ -641,4 +654,119 @@ fun testSuspendOnAttach() {
 
     println("=== Suspend-On-Attach Demo Complete ===")
     println("Tip: Start this program with suspend=y and attach kdb to debug from the very first line.")
+}
+
+/**
+ * 协程视图测试
+ * 测试方法：
+ * 1. 在调试模式下运行程序（suspend=n），attach 调试器
+ * 2. 输入 "coroutines" 命令启动多个协程
+ * 3. 在 VSCode 调试侧边栏的 "Kotlin Coroutines" 面板中查看协程列表
+ * 4. 点击刷新按钮可以获取最新协程状态
+ *
+ * 注意：需要在 classpath 中包含 kotlinx-coroutines-debug 才能看到完整协程信息
+ */
+fun testCoroutinesView() {
+    println("=== Coroutine View Test ===")
+    println("Starting coroutines... Check the 'Kotlin Coroutines' view in VS Code debug panel")
+    println()
+
+    runBlocking {
+        // 启动多个不同状态的协程
+        val jobs = mutableListOf<Job>()
+
+        // 协程1: 循环计算（RUNNING 状态）
+        jobs += launch(Dispatchers.Default + CoroutineName("worker-1")) {
+            var count = 0
+            while (count < 10) {
+                delay(500)
+                count++
+                println("  [worker-1] count=$count")
+            }
+        }
+
+        // 协程2: 等待 IO（SUSPENDED 状态）
+        jobs += launch(Dispatchers.IO + CoroutineName("io-task")) {
+            println("  [io-task] Starting IO simulation...")
+            delay(3000) // 模拟 IO 等待（SUSPENDED 状态）
+            println("  [io-task] IO complete")
+        }
+
+        // 协程3: 数据处理
+        jobs += launch(CoroutineName("data-processor")) {
+            val data = listOf(1, 2, 3, 4, 5)
+            for (item in data) {
+                delay(400)
+                println("  [data-processor] Processing item $item")
+            }
+        }
+
+        println("  Launched 3 coroutines. Refresh the Coroutines view to see their states.")
+        println("  Program will wait for all coroutines to complete...")
+        jobs.joinAll()
+    }
+
+    println("=== Coroutine View Test Complete ===")
+}
+
+/**
+ * Logpoint 测试
+ * 测试方法：
+ * 1. 在调试模式下运行程序
+ * 2. 输入 "logpoint" 命令
+ * 3. 在 VSCode 中，右键断点 -> 选择 "Add Logpoint"
+ * 4. 在 logMessage 中输入类似 "i = {i}, squared = {squared}" 的模板
+ * 5. 程序运行时会在调试控制台输出日志，但不会暂停执行
+ */
+fun testLogpoint() {
+    println("=== Logpoint Test ===")
+    println("Set a LOGPOINT (not a regular breakpoint) on the line inside the loop")
+    println("Use logMessage template like: 'Loop iteration: i={i}, result={result}'")
+    println()
+
+    for (i in 1..10) {
+        val result = i * i        // <-- 在这里设置 Logpoint
+        val message = "item_$i"   // <-- 变量供 logpoint 模板使用
+        println("  Processing $message -> $result")
+        Thread.sleep(200)
+    }
+
+    println("=== Logpoint Test Complete ===")
+    println("Check the Debug Console for logpoint output (no breakpoints should have paused execution)")
+}
+
+/**
+ * Hot Code Replace 测试
+ * 测试方法：
+ * 1. 启动调试会话（suspend=n 模式）
+ * 2. 输入 "hcr" 开始循环
+ * 3. 修改代码并重新编译 (.class 文件更新)
+ * 4. 使用 VSCode 命令面板: "Kotlin Debug: Hot Code Replace"
+ * 5. 或者在编辑器右键菜单选择 "Kotlin Debug: Hot Code Replace"
+ * 6. 观察输出变化（无需重启程序）
+ */
+fun testHotCodeReplace() {
+    println("=== Hot Code Replace Test ===")
+    println("Modify this function's output and recompile, then use 'Kotlin Debug: Hot Code Replace'")
+    println()
+
+    // 这个循环将持续运行，方便测试 HCR
+    // 修改 greetMessage 函数后重新编译，然后触发 HCR 观察变化
+    var iteration = 0
+    while (iteration < 30) {
+        iteration++
+        println("  [HCR Test] Iteration $iteration: ${greetMessage(iteration)}")
+        Thread.sleep(1000) // 每秒输出一次，给用户修改代码的时间
+    }
+
+    println("=== Hot Code Replace Test Complete ===")
+}
+
+/**
+ * HCR 测试用函数 - 修改这个函数的实现后，通过 HCR 验证修改生效
+ */
+fun greetMessage(count: Int): String {
+    // 尝试修改这里的返回值，然后触发 Hot Code Replace
+    return "Hello #$count (original)"
+}
 }
