@@ -8,6 +8,10 @@ import com.kotlindebugger.core.coroutine.CoroutineState
 import com.kotlindebugger.core.event.DebugEventListener
 import com.kotlindebugger.core.hotswap.HotCodeReplaceResult
 import com.kotlindebugger.core.jdi.DebugTarget
+import com.sun.jdi.ArrayReference
+import com.sun.jdi.IntegerValue
+import com.sun.jdi.ObjectReference
+import com.sun.jdi.StringReference
 import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -803,16 +807,57 @@ class CommandProcessor(
             }
 
             is DebugEvent.ExceptionThrown -> {
-                val location = event.location?.let { " at ${it.file}:${it.line}" } ?: ""
-                println()
-                println(formatter.red("Exception: ${event.exceptionClass}$location"))
-                if (event.message != null) {
-                    println(formatter.red("  Message: ${event.message}"))
+                eventQueue.offer {
+                    val location = event.location?.let { " at ${it.file}:${it.line}" } ?: ""
+                    println()
+                    println(formatter.red("Exception: ${event.exceptionClass}$location"))
+                    if (event.message != null) {
+                        println(formatter.red("  Message: ${event.message}"))
+                    }
+                    // 尝试利用缓存的异常对象打印完整堆栈（与 DAP exceptionInfo 保持一致）
+                    val excObj = session?.getLastExceptionObject()
+                    val stackLines = excObj?.let { readStackTraceLines(it) }
+                    if (!stackLines.isNullOrEmpty()) {
+                        println(formatter.dim("  Stack trace:"))
+                        stackLines.take(15).forEach { println(formatter.dim("    $it")) }
+                        if (stackLines.size > 15) {
+                            println(formatter.dim("    ... ${stackLines.size - 15} more"))
+                        }
+                    }
+                    println()
+                    System.out.flush()
                 }
             }
 
             else -> {}
         }
+    }
+
+    /**
+     * 从异常对象的 stackTrace 字段读取格式化堆栈行。
+     * 仅通过 JDI 字段访问，不调用 JVM 方法，避免死锁。
+     */
+    private fun readStackTraceLines(exception: ObjectReference): List<String>? {
+        return try {
+            val field = exception.referenceType().fieldByName("stackTrace") ?: return null
+            val array = exception.getValue(field) as? ArrayReference ?: return null
+            array.values.mapNotNull { elem ->
+                if (elem !is ObjectReference) return@mapNotNull null
+                val t = elem.referenceType()
+                fun str(n: String) = try { (elem.getValue(t.fieldByName(n)) as? StringReference)?.value() } catch (_: Exception) { null }
+                fun int(n: String) = try { (elem.getValue(t.fieldByName(n)) as? IntegerValue)?.value() ?: -1 } catch (_: Exception) { -1 }
+                val cls = str("declaringClass") ?: return@mapNotNull null
+                val method = str("methodName") ?: "?"
+                val file = str("fileName")
+                val line = int("lineNumber")
+                val loc = when {
+                    file != null && line > 0 -> "$file:$line"
+                    file != null -> file
+                    else -> "Native Method"
+                }
+                "at $cls.$method($loc)"
+            }
+        } catch (_: Exception) { null }
     }
 
     /**

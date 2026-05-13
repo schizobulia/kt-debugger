@@ -728,3 +728,71 @@ fun main() = runBlocking {
 
 如果以上设计方案没有问题，我将开始实现 Phase 1 的基础框架。
 
+---
+
+## 十一、VSCode 扩展功能设计
+
+### 11.1 InlineValues Provider
+
+**目标**: 调试暂停时在编辑器中内联显示变量值。
+
+**实现**: `KotlinInlineValuesProvider implements vscode.InlineValuesProvider`
+
+```
+停止行 ±10 行范围内 → 提取标识符 → 过滤 Kotlin 关键字/类型名 → 返回 InlineValueVariableLookup
+```
+
+- 通过 `vscode.languages.registerInlineValuesProvider` 注册
+- 使用 `InlineValueVariableLookup` 让 VS Code 自动从调试上下文中查找变量值
+- `KOTLIN_KEYWORDS` 和 `COMMON_TYPE_NAMES` 集合用于过滤非变量标识符
+
+### 11.2 CodeLens 增强
+
+**CodeLens Provider**: `KotlinDebugCodeLensProvider`
+
+| 场景 | 显示内容 |
+|------|----------|
+| `fun main(` | `▶ Run` / `Debug` |
+| `@JvmStatic fun main(` | `▶ Run` / `Debug` |
+| `@Test fun xxx(` | `▶ Run Test` / `Debug Test` |
+
+**关键改进**:
+- `mainFunctionPattern` 使用 `/^\s*(?:@\S+\s+)*fun\s+main\s*\(/` 支持注解前缀
+- 通过 `testAnnotationPattern` 检测 `@Test`/`@org.junit.Test` 注解
+- `findNextFunLine()` 在检测到注解后向后查找 `fun` 声明行
+- `findEnclosingClassName()` 向上扫描获取类名，用于 Gradle 测试过滤
+
+### 11.3 Java 路径配置
+
+**设置项**: `kotlin-debug.javaHome`
+
+**查找顺序** (在 `KotlinDebugAdapterDescriptorFactory.resolveJavaExecutable()`):
+1. `kotlin-debug.javaHome` 配置
+2. `JAVA_HOME` 环境变量
+3. 系统 `java` 命令（PATH 中）
+
+### 11.4 调试前构建集成
+
+**设置项**: `kotlin-debug.buildBeforeDebug` (默认: `false`)
+
+**实现** (在 `KotlinDebugConfigurationProvider.resolveDebugConfiguration()`):
+- 在解析调试配置后、启动调试会话前调用 `runPreDebugBuild()`
+- 检测构建工具：存在 `gradlew` → Gradle (`./gradlew classes`)；存在 `pom.xml` → Maven (`mvn compile -q`)
+- 构建失败弹出错误通知并取消调试会话（返回 `undefined`）
+
+### 11.5 异常详情增强
+
+**后端实现** (`ExceptionInfoHandler`):
+
+```
+DAP exceptionInfo 请求
+  → EventHandler.lastExceptionObject（缓存最近一次异常对象引用）
+  → buildExceptionInfo(exception, thread)
+    ├── getExceptionMessage()        -- 读取 detailMessage 字段
+    ├── buildStackTrace()            -- 优先读 stackTrace 字段，回退到 JDI frames
+    └── buildCauseChain()            -- cause 链（1层）
+  → 返回: exceptionId, description("Type: message"), details.stackTrace, details.innerException
+```
+
+**关键设计**: 使用 JDI 字段访问（非方法调用）避免线程挂起状态下的死锁风险。
+

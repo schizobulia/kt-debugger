@@ -51,6 +51,15 @@ class EventHandler(private val vm: VirtualMachine) {
     // 条件表达式求值器
     private val conditionEvaluator = ConditionEvaluator(vm)
 
+    // 最近一次触发的异常对象引用（供 ExceptionInfoHandler 直接查询使用）
+    @Volatile
+    private var lastExceptionObject: ObjectReference? = null
+
+    /**
+     * 获取最近触发的异常对象引用
+     */
+    fun getLastExceptionObject(): ObjectReference? = lastExceptionObject
+
     /**
      * 添加事件监听器
      */
@@ -226,6 +235,8 @@ class EventHandler(private val vm: VirtualMachine) {
 
             is ExceptionEvent -> {
                 val exception = event.exception()
+                // 缓存异常对象引用，供 ExceptionInfoHandler 查询
+                lastExceptionObject = exception
                 DebugEvent.ExceptionThrown(
                     exceptionClass = exception.referenceType().name(),
                     message = getExceptionMessage(exception),

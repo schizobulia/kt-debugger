@@ -275,7 +275,20 @@ if [ -d "test-program" ]; then
         mkdir -p test-program/build
 
         # 编译InteractiveTest.kt（保留调试信息，确保断点可用）
-        if kotlinc test-program/InteractiveTest.kt -include-runtime -d test-program/InteractiveTest.jar; then
+        # 需要 kotlinx-coroutines-core，优先从 Gradle 缓存或本地 build/libs 中查找
+        COROUTINES_JAR=""
+        # 1. 尝试从 Gradle 依赖缓存查找
+        COROUTINES_CACHE=$(find "$HOME/.gradle/caches" -name "kotlinx-coroutines-core-jvm-*.jar" 2>/dev/null | head -1)
+        if [ -n "$COROUTINES_CACHE" ]; then
+            COROUTINES_JAR="$COROUTINES_CACHE"
+        fi
+
+        COMPILE_CMD="kotlinc test-program/InteractiveTest.kt -include-runtime -d test-program/InteractiveTest.jar"
+        if [ -n "$COROUTINES_JAR" ]; then
+            COMPILE_CMD="kotlinc test-program/InteractiveTest.kt -include-runtime -classpath \"$COROUTINES_JAR\" -d test-program/InteractiveTest.jar"
+        fi
+
+        if eval "$COMPILE_CMD"; then
             print_success "测试程序编译成功: test-program/InteractiveTest.jar"
             cp test-program/InteractiveTest.jar "$RELEASE_DIR/"
             print_info "测试程序已复制到发布目录: $RELEASE_DIR/InteractiveTest.jar"

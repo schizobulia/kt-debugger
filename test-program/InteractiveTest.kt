@@ -68,6 +68,12 @@ fun main() {
             input == "hcr" -> {
                 testHotCodeReplace()
             }
+            input == "exception" -> {
+                testExceptionDetails()
+            }
+            input == "inline-values" -> {
+                testInlineValues()
+            }
             input == "help" || input == "?" -> {
                 printHelp()
             }
@@ -114,6 +120,8 @@ fun printHelp() {
           coroutines   - Test coroutine view panel (multiple coroutines)
           logpoint     - Test logpoints (set logpoints in VS Code)
           hcr          - Test hot code replace (modify & reload classes)
+          exception    - Test enhanced exception details (enable Caught Exceptions breakpoint)
+          inline-values - Test inline values provider (set breakpoints inside the function)
           suspend-demo - Demo for suspend-on-attach: run early init code (set breakpoints before this)
           add X Y      - Add two numbers
           help         - Show this help
@@ -769,4 +777,83 @@ fun greetMessage(count: Int): String {
     // 尝试修改这里的返回值，然后触发 Hot Code Replace
     return "Hello #$count (original)"
 }
+
+// ==================== 新功能示例 ====================
+
+/**
+ * 测试增强的异常详情（Features: 异常详情增强）
+ * 在调试器中：
+ *   1. 启用"Caught Exceptions"断点
+ *   2. 运行此函数，调试器将在异常处暂停
+ *   3. 查看"EXCEPTION" 面板，应显示完整的堆栈跟踪和 cause 链
+ */
+fun testExceptionDetails() {
+    println("=== Exception Details Enhancement Test ===")
+    println("Enable 'Caught Exceptions' breakpoint, then run this test.")
+    println("You should see full stack trace and cause chain in the debug panel.")
+    println()
+
+    try {
+        throwWithCause()
+    } catch (e: RuntimeException) {
+        println("Caught: ${e.message}")
+        println("Cause: ${e.cause?.message}")
+    }
+
+    println("=== Exception Details Test Complete ===")
+}
+
+/** 抛出带 cause 链的异常，用于验证增强的异常详情 */
+fun throwWithCause() {
+    try {
+        val list = listOf(1, 2, 3)
+        val value = list[10]  // IndexOutOfBoundsException
+        println(value)
+    } catch (e: IndexOutOfBoundsException) {
+        // 包装成带 cause 的 RuntimeException
+        throw RuntimeException("Failed to process list element", e)
+    }
+}
+
+/**
+ * 测试内联值提供者（Features: InlineValues Provider）
+ * 在调试器中暂停后，观察编辑器中的变量值显示在代码旁边。
+ * 需要 VS Code 1.80+ 且调试器暂停状态下生效。
+ */
+fun testInlineValues() {
+    println("=== Inline Values Provider Test ===")
+    println("Set a breakpoint inside this function to see inline values in the editor.")
+    println()
+
+    val name = "Kotlin"          // 在这里暂停，应该看到 name = "Kotlin"
+    val version = 2.0            // version = 2.0
+    val isDebug = true           // isDebug = true
+    val items = listOf(1, 2, 3)  // items 应该显示 list 信息
+
+    println("name=$name, version=$version, isDebug=$isDebug, items=$items")
+    println("=== Inline Values Test Complete ===")
+}
+
+/**
+ * @JvmStatic main 函数示例（用于验证 @JvmStatic CodeLens 修复）
+ * 在 VS Code 中打开此文件，应该在这个函数旁看到 "Debug" CodeLens。
+ */
+class JvmStaticExample {
+    companion object {
+        @JvmStatic
+        fun main(args: Array<String>) {
+            println("JvmStatic main function works!")
+        }
+    }
+}
+
+/**
+ * 内联 @JvmStatic（同行写法，之前可能没有 CodeLens）
+ */
+class JvmStaticInlineExample {
+    companion object {
+        @JvmStatic fun runExample() {
+            println("Inline @JvmStatic example")
+        }
+    }
 }

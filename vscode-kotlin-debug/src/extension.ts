@@ -121,6 +121,30 @@ export function activate(context: vscode.ExtensionContext) {
         )
     );
 
+    // 注册内联值提供者（调试暂停时在编辑器行内显示变量值）
+    context.subscriptions.push(
+        vscode.languages.registerInlineValuesProvider(
+            { language: 'kotlin', scheme: 'file' },
+            new KotlinInlineValuesProvider()
+        )
+    );
+
+    // 注册 @Test CodeLens 命令：运行测试
+    context.subscriptions.push(
+        vscode.commands.registerCommand('kotlin-debug.runTest',
+            (args: { file: string; className: string; methodName: string }) => {
+                runKotlinTest(args, false);
+            })
+    );
+
+    // 注册 @Test CodeLens 命令：调试测试
+    context.subscriptions.push(
+        vscode.commands.registerCommand('kotlin-debug.debugTest',
+            (args: { file: string; className: string; methodName: string }) => {
+                runKotlinTest(args, true);
+            })
+    );
+
     // 监听调试会话开始事件
     context.subscriptions.push(
         vscode.debug.onDidStartDebugSession((session) => {
@@ -577,6 +601,15 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
             config.sourcePaths = await this.detectSourcePaths(folder);
         }
 
+        // 调试前构建（若启用）
+        const debugConfig = vscode.workspace.getConfiguration('kotlin-debug');
+        if (debugConfig.get<boolean>('buildBeforeDebug', false)) {
+            const built = await this.runPreDebugBuild(folder);
+            if (!built) {
+                return undefined;  // 构建失败时中止调试
+            }
+        }
+
         // 验证必需的配置
         if (config.request === 'launch') {
             if (!config.command) {
@@ -755,6 +788,52 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
         });
     }
 
+    /**
+     * 调试前构建：对 Gradle/Maven 项目执行编译，确保 .class 文件是最新的。
+     * 返回 true 表示构建成功（或跳过），false 表示构建失败。
+     */
+    private async runPreDebugBuild(folder: vscode.WorkspaceFolder | undefined): Promise<boolean> {
+        const workspacePath = folder?.uri.fsPath || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workspacePath) { return true; }
+
+        // 判断项目类型
+        const hasGradle = fs.existsSync(path.join(workspacePath, 'build.gradle.kts'))
+            || fs.existsSync(path.join(workspacePath, 'build.gradle'));
+        const hasMaven = fs.existsSync(path.join(workspacePath, 'pom.xml'));
+
+        let buildCmd: string;
+        if (hasGradle) {
+            // gradle classes 比 build 更快（只编译，不打包/测试）
+            buildCmd = process.platform === 'win32' ? 'gradlew.bat classes' : './gradlew classes';
+        } else if (hasMaven) {
+            buildCmd = 'mvn compile -q';
+        } else {
+            // 无法识别的项目类型，跳过
+            return true;
+        }
+
+        logChannel.appendLine(`[Extension] Pre-debug build: ${buildCmd}`);
+
+        return vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: 'Building before debug...', cancellable: false },
+            () => new Promise<boolean>((resolve) => {
+                cp.exec(buildCmd, { cwd: workspacePath }, (error, stdout, stderr) => {
+                    if (error) {
+                        const msg = stderr || error.message;
+                        logChannel.appendLine(`[Extension] Pre-debug build failed:\n${msg}`);
+                        vscode.window.showErrorMessage(
+                            `Pre-debug build failed. Check "Kotlin Debugger Logs" for details.\n${msg.substring(0, 200)}`
+                        );
+                        resolve(false);
+                    } else {
+                        logChannel.appendLine(`[Extension] Pre-debug build succeeded.`);
+                        resolve(true);
+                    }
+                });
+            })
+        );
+    }
+
     provideDebugConfigurations(
         folder: vscode.WorkspaceFolder | undefined,
         token?: vscode.CancellationToken
@@ -812,6 +891,10 @@ class KotlinDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescript
         console.log(`Using kotlin-debugger JAR: ${jarPath}`);
         logChannel.appendLine(`[Extension] Using kotlin-debugger JAR: ${jarPath}`);
 
+        // 解析 java 可执行文件路径（支持 javaHome 配置）
+        const javaExecutable = this.resolveJavaExecutable();
+        logChannel.appendLine(`[Extension] Using Java executable: ${javaExecutable}`);
+
         // 使用 java 启动 DAP 服务器，启用调试模式
         const args = [
             '-jar',
@@ -821,7 +904,7 @@ class KotlinDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescript
         ];
 
         // 手动启动进程以便捕获 stderr 和崩溃信息
-        this.debuggerProcess = cp.spawn('java', args, {
+        this.debuggerProcess = cp.spawn(javaExecutable, args, {
             stdio: ['pipe', 'pipe', 'pipe']
         });
 
@@ -901,6 +984,32 @@ class KotlinDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescript
         }
 
         return undefined;
+    }
+
+    /**
+     * 解析 java 可执行文件路径。
+     * 优先使用 kotlin-debug.javaHome 配置，其次 JAVA_HOME 环境变量，最后回退到 PATH 中的 java。
+     */
+    private resolveJavaExecutable(): string {
+        const config = vscode.workspace.getConfiguration('kotlin-debug');
+        const javaHome = config.get<string>('javaHome', '').trim();
+        if (javaHome) {
+            const javaExe = path.join(javaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+            if (fs.existsSync(javaExe)) {
+                return javaExe;
+            }
+            logChannel.appendLine(`[Extension] Warning: javaHome set to "${javaHome}" but java not found there, falling back.`);
+        }
+        // 尝试 JAVA_HOME 环境变量
+        const envJavaHome = process.env['JAVA_HOME'];
+        if (envJavaHome) {
+            const javaExe = path.join(envJavaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+            if (fs.existsSync(javaExe)) {
+                return javaExe;
+            }
+        }
+        // 最终回退：PATH 中的 java
+        return 'java';
     }
 
     private resolvePath(p: string): string {
@@ -1004,14 +1113,18 @@ class DebugAdapterStreamWrapper implements vscode.DebugAdapter {
 }
 
 /**
- * 代码透镜提供者 - 在 main 函数上显示 "Debug" 按钮
+ * 代码透镜提供者 - 在 main 函数上显示 "Debug" 按钮，在 @Test 函数上显示测试按钮
  */
 class KotlinDebugCodeLensProvider implements vscode.CodeLensProvider {
     private _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
     public readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
 
-    // main 函数的正则表达式模式
-    private readonly mainFunctionPattern = /^\s*fun\s+main\s*\(/;
+    // main 函数匹配：支持 fun main( 和 @JvmStatic fun main( 同行写法
+    private readonly mainFunctionPattern = /^\s*(?:@\S+\s+)*fun\s+main\s*\(/;
+    // @Test 注解匹配（JUnit4/5）
+    private readonly testAnnotationPattern = /^\s*@(?:Test|org\.junit\.(?:jupiter\.api\.)?Test)\b/;
+    // fun 声明匹配（用于 @Test 后检查下一有效行）
+    private readonly funDeclPattern = /^\s*(?:@\S+\s+)*fun\s+(\w+)\s*\(/;
 
     provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
         // 检查配置是否启用代码透镜
@@ -1021,31 +1134,89 @@ class KotlinDebugCodeLensProvider implements vscode.CodeLensProvider {
         }
 
         const codeLenses: vscode.CodeLens[] = [];
-        const text = document.getText();
-        const lines = text.split('\n');
+        const lines = document.getText().split('\n');
 
         for (let i = 0; i < lines.length; i++) {
-            if (this.mainFunctionPattern.test(lines[i])) {
-                const range = new vscode.Range(i, 0, i, lines[i].length);
-                
-                // Debug 按钮
+            const line = lines[i];
+
+            // 跳过注释行
+            const trimmed = line.trim();
+            if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+                continue;
+            }
+
+            // 检测 main 函数（包括 @JvmStatic fun main 同行写法）
+            if (this.mainFunctionPattern.test(line)) {
+                const range = new vscode.Range(i, 0, i, line.length);
                 codeLenses.push(new vscode.CodeLens(range, {
                     title: '$(debug-start) Debug',
                     command: 'kotlin-debug.debugMain',
                     arguments: [{ file: document.uri.fsPath, line: i + 1 }],
                     tooltip: 'Debug this Kotlin main function'
                 }));
-
-                // Run 按钮（不带调试）
                 codeLenses.push(new vscode.CodeLens(range, {
                     title: '$(play) Run',
                     command: 'workbench.action.debug.run',
                     tooltip: 'Run without debugging'
                 }));
+                continue;
+            }
+
+            // 检测 @Test 注解：在此行找到注解后，向下找最近的 fun 声明
+            if (this.testAnnotationPattern.test(line)) {
+                const funLine = this.findNextFunLine(lines, i + 1);
+                if (funLine !== -1) {
+                    const funMatch = this.funDeclPattern.exec(lines[funLine]);
+                    if (funMatch) {
+                        const methodName = funMatch[1];
+                        const range = new vscode.Range(funLine, 0, funLine, lines[funLine].length);
+                        // 获取类名（向上查找 class 声明）
+                        const className = this.findEnclosingClassName(lines, funLine) || '';
+                        codeLenses.push(new vscode.CodeLens(range, {
+                            title: '$(beaker) Run Test',
+                            command: 'kotlin-debug.runTest',
+                            arguments: [{ file: document.uri.fsPath, className, methodName }],
+                            tooltip: `Run test: ${methodName}`
+                        }));
+                        codeLenses.push(new vscode.CodeLens(range, {
+                            title: '$(debug-start) Debug Test',
+                            command: 'kotlin-debug.debugTest',
+                            arguments: [{ file: document.uri.fsPath, className, methodName }],
+                            tooltip: `Debug test: ${methodName}`
+                        }));
+                    }
+                }
             }
         }
 
         return codeLenses;
+    }
+
+    /** 从指定行向下查找最近的 fun 声明行（跳过空行和注解行，最多向下 5 行） */
+    private findNextFunLine(lines: string[], startLine: number): number {
+        for (let i = startLine; i < Math.min(startLine + 5, lines.length); i++) {
+            const t = lines[i].trim();
+            if (t.startsWith('fun ') || /^(?:@\S+\s+)*fun\s/.test(t)) {
+                return i;
+            }
+            // 遇到非空、非注解的行就停止
+            if (t && !t.startsWith('@') && !t.startsWith('//') && !t.startsWith('*')) {
+                break;
+            }
+        }
+        return -1;
+    }
+
+    /** 向上查找包含此函数的类名 */
+    private findEnclosingClassName(lines: string[], lineIndex: number): string | undefined {
+        const classPattern = /^\s*(?:(?:open|abstract|data|sealed|inner|private|public|protected|internal)\s+)*class\s+(\w+)/;
+        for (let i = lineIndex; i >= 0; i--) {
+            const match = classPattern.exec(lines[i]);
+            if (match) {
+                return match[1];
+            }
+        }
+        return undefined;
     }
 
     resolveCodeLens(codeLens: vscode.CodeLens): vscode.CodeLens {
@@ -1111,6 +1282,80 @@ class KotlinDebugHoverProvider implements vscode.HoverProvider {
         return undefined;
     }
 }
+
+// ==================== 内联值提供者 ====================
+
+/**
+ * Kotlin 调试内联值提供者
+ * 调试暂停时，在编辑器行内显示变量的当前值。
+ * 使用 InlineValueVariableLookup，让 VS Code 自动通过 DAP 协议查询变量值，
+ * 无需后端额外实现，对运行时性能无影响。
+ */
+class KotlinInlineValuesProvider implements vscode.InlineValuesProvider {
+    provideInlineValues(
+        document: vscode.TextDocument,
+        viewPort: vscode.Range,
+        context: vscode.InlineValueContext
+    ): vscode.ProviderResult<vscode.InlineValue[]> {
+        const inlineValues: vscode.InlineValue[] = [];
+        const stoppedLine = context.stoppedLocation.end.line;
+
+        // 只在暂停行附近（±10 行内）展示内联值，避免噪音过多
+        const startLine = Math.max(viewPort.start.line, stoppedLine - 10);
+        const endLine = Math.min(viewPort.end.line, stoppedLine + 2);
+
+        for (let i = startLine; i <= endLine; i++) {
+            const line = document.lineAt(i);
+            const text = line.text;
+
+            // 跳过注释行和空行
+            const trimmed = text.trim();
+            if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+                continue;
+            }
+
+            // 提取行内标识符，交给 VS Code 去查询其当前值
+            const identifierRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/g;
+            let match: RegExpExecArray | null;
+            while ((match = identifierRegex.exec(text)) !== null) {
+                const name = match[1];
+                // 过滤 Kotlin 关键字和常见类型名，减少无效查询
+                if (!KOTLIN_KEYWORDS.has(name) && !COMMON_TYPE_NAMES.has(name)) {
+                    const range = new vscode.Range(i, match.index, i, match.index + name.length);
+                    // caseSensitiveLookup=false，兼容 Kotlin 编译后变量名大小写变化
+                    inlineValues.push(new vscode.InlineValueVariableLookup(range, name, false));
+                }
+            }
+        }
+
+        return inlineValues;
+    }
+}
+
+/** Kotlin 关键字集合（用于过滤内联值） */
+const KOTLIN_KEYWORDS = new Set([
+    'as', 'break', 'class', 'continue', 'do', 'else', 'false', 'for', 'fun',
+    'if', 'in', 'interface', 'is', 'null', 'object', 'package', 'return',
+    'super', 'this', 'throw', 'true', 'try', 'typealias', 'typeof', 'val',
+    'var', 'when', 'while', 'by', 'catch', 'constructor', 'delegate', 'dynamic',
+    'field', 'file', 'finally', 'get', 'import', 'init', 'param', 'property',
+    'receiver', 'set', 'setparam', 'where', 'actual', 'abstract', 'annotation',
+    'companion', 'crossinline', 'data', 'enum', 'expect', 'external', 'final',
+    'infix', 'inline', 'inner', 'internal', 'lateinit', 'noinline', 'open',
+    'operator', 'out', 'override', 'private', 'protected', 'public', 'reified',
+    'sealed', 'suspend', 'tailrec', 'vararg', 'it'
+]);
+
+/** 常见类型名集合（减少无效变量查询） */
+const COMMON_TYPE_NAMES = new Set([
+    'String', 'Int', 'Long', 'Double', 'Float', 'Boolean', 'Byte', 'Short',
+    'Char', 'Unit', 'Any', 'Nothing', 'List', 'Map', 'Set', 'Array',
+    'ArrayList', 'HashMap', 'HashSet', 'MutableList', 'MutableMap', 'MutableSet',
+    'Pair', 'Triple', 'Result', 'Exception', 'Error', 'Throwable',
+    'println', 'print', 'TODO', 'require', 'check', 'assert', 'run', 'let',
+    'also', 'apply', 'with', 'repeat', 'lazy', 'listOf', 'mapOf', 'setOf',
+    'arrayOf', 'emptyList', 'emptyMap', 'emptySet'
+]);
 
 // ==================== 协程视图 ====================
 
@@ -1383,5 +1628,83 @@ function inferClassName(classFile: string, workspaceRoot: string): string {
     }
 
     return '';
+}
+
+// ==================== @Test CodeLens 测试运行 ====================
+
+/**
+ * 运行或调试单个 Kotlin 测试方法。
+ * 对 Gradle 项目：使用 `./gradlew test --tests "ClassName.methodName"`
+ * 调试模式：先启动带 JDWP 参数的 Gradle 测试，再 attach 调试器。
+ *
+ * @param args 测试参数（文件路径、类名、方法名）
+ * @param debug 是否以调试模式运行
+ */
+async function runKotlinTest(
+    args: { file: string; className: string; methodName: string },
+    debug: boolean
+): Promise<void> {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+    }
+
+    const workspacePath = workspaceFolder.uri.fsPath;
+    const hasGradle = fs.existsSync(path.join(workspacePath, 'build.gradle.kts'))
+        || fs.existsSync(path.join(workspacePath, 'build.gradle'));
+
+    if (!hasGradle) {
+        vscode.window.showWarningMessage(
+            'Test runner currently only supports Gradle projects. Please run tests manually.'
+        );
+        return;
+    }
+
+    // 拼接测试过滤器：若有类名则 "ClassName.methodName"，否则只用方法名
+    const testFilter = args.className
+        ? `${args.className}.${args.methodName}`
+        : args.methodName;
+
+    const gradlewCmd = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
+
+    if (debug) {
+        // 调试模式：注入 JDWP 参数，然后 attach 调试器
+        const debugPort = 5006;
+        const jvmArgs = `-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=${debugPort}`;
+        const cmd = `${gradlewCmd} test --tests "${testFilter}" --info -Dorg.gradle.jvmargs="${jvmArgs}"`;
+
+        const terminal = vscode.window.createTerminal({
+            name: `Debug Test: ${args.methodName}`,
+            cwd: workspacePath
+        });
+        terminal.show(true);
+        terminal.sendText(cmd);
+        logChannel.appendLine(`[Test] Launching debug test: ${cmd}`);
+
+        // 等待调试端口就绪后自动 attach
+        const debugConfig: vscode.DebugConfiguration = {
+            type: 'kotlin',
+            request: 'attach',
+            name: `Debug Test: ${args.methodName}`,
+            host: 'localhost',
+            port: debugPort,
+            sourcePaths: ['${workspaceFolder}/src/main/kotlin', '${workspaceFolder}/src/test/kotlin']
+        };
+        // 延迟 3 秒等待 JVM 启动（Gradle 启动时间较长）
+        setTimeout(async () => {
+            await vscode.debug.startDebugging(workspaceFolder, debugConfig);
+        }, 3000);
+    } else {
+        // 普通运行模式：在集成终端中执行
+        const cmd = `${gradlewCmd} test --tests "${testFilter}"`;
+        const terminal = vscode.window.createTerminal({
+            name: `Run Test: ${args.methodName}`,
+            cwd: workspacePath
+        });
+        terminal.show(true);
+        terminal.sendText(cmd);
+        logChannel.appendLine(`[Test] Running test: ${cmd}`);
+    }
 }
 

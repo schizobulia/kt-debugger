@@ -3,8 +3,11 @@ package com.kotlindebugger.dap.handler
 import com.kotlindebugger.core.DebugSession
 import com.kotlindebugger.dap.DAPServer
 import com.kotlindebugger.dap.Logger
+import com.sun.jdi.ArrayReference
+import com.sun.jdi.IntegerValue
 import com.sun.jdi.ObjectReference
 import com.sun.jdi.StringReference
+import com.sun.jdi.ThreadReference
 import kotlinx.serialization.json.*
 
 /**
@@ -35,129 +38,188 @@ class ExceptionInfoHandler(private val server: DAPServer) : RequestHandler {
             throw IllegalStateException("Thread is not suspended")
         }
 
-        // 尝试从当前栈帧获取异常信息
-        try {
-            val frames = thread.frames()
-            if (frames.isEmpty()) {
-                return buildEmptyExceptionInfo()
+        return try {
+            // 优先使用 EventHandler 缓存的异常对象（最可靠，无需扫描局部变量）
+            val cachedException = debugSession.getLastExceptionObject()
+            if (cachedException != null) {
+                buildExceptionInfo(cachedException, thread)
+            } else {
+                // 回退：扫描栈帧局部变量查找 Throwable
+                val fallback = findExceptionInThread(thread)
+                if (fallback != null) buildExceptionInfo(fallback, thread)
+                else buildEmptyExceptionInfo()
             }
-
-            // 查找异常对象
-            // 在异常断点命中时，异常对象通常是当前帧的第一个局部变量或在特殊寄存器中
-            var exceptionObject: ObjectReference? = null
-            
-            // 方法1: 尝试从 EventHandler 缓存获取（如果实现了）
-            // 方法2: 尝试从栈帧的局部变量中查找 Throwable 类型的对象
-            for (frame in frames) {
-                try {
-                    val visibleVariables = frame.visibleVariables()
-                    for (variable in visibleVariables) {
-                        val value = frame.getValue(variable)
-                        if (value is ObjectReference) {
-                            val typeName = value.referenceType().name()
-                            if (isThrowableType(typeName)) {
-                                exceptionObject = value
-                                break
-                            }
-                        }
-                    }
-                    if (exceptionObject != null) break
-                } catch (e: Exception) {
-                    // 某些帧可能没有调试信息
-                    Logger.debug("Could not inspect frame: ${e.message}")
-                }
-            }
-
-            if (exceptionObject == null) {
-                // 尝试从第一个帧的 this 对象查找（如果当前在 catch 块中）
-                try {
-                    val thisObject = frames[0].thisObject()
-                    if (thisObject != null && isThrowableType(thisObject.referenceType().name())) {
-                        exceptionObject = thisObject
-                    }
-                } catch (e: Exception) {
-                    Logger.debug("Could not get this object: ${e.message}")
-                }
-            }
-
-            if (exceptionObject != null) {
-                return buildExceptionInfo(exceptionObject)
-            }
-
-            // 无法找到异常对象，返回基本信息
-            return buildEmptyExceptionInfo()
-
         } catch (e: Exception) {
             Logger.error("Error getting exception info", e)
-            return buildEmptyExceptionInfo()
+            buildEmptyExceptionInfo()
         }
     }
 
     /**
-     * 检查类型是否是 Throwable 的子类
+     * 在线程栈帧的局部变量中查找 Throwable 对象（回退策略）
      */
-    private fun isThrowableType(typeName: String): Boolean {
-        return typeName == "java.lang.Throwable" ||
-               typeName == "java.lang.Exception" ||
-               typeName == "java.lang.Error" ||
-               typeName == "java.lang.RuntimeException" ||
-               typeName.endsWith("Exception") ||
-               typeName.endsWith("Error")
-    }
-
-    /**
-     * 构建异常信息响应
-     */
-    private fun buildExceptionInfo(exception: ObjectReference): JsonObject {
-        val typeName = exception.referenceType().name()
-        
-        // 获取异常消息
-        var message: String? = null
-        try {
-            val messageField = exception.referenceType().fieldByName("detailMessage")
-            if (messageField != null) {
-                val messageValue = exception.getValue(messageField)
-                if (messageValue is StringReference) {
-                    message = messageValue.value()
+    private fun findExceptionInThread(thread: ThreadReference): ObjectReference? {
+        val frames = try { thread.frames() } catch (e: Exception) { return null }
+        for (frame in frames) {
+            try {
+                for (variable in frame.visibleVariables()) {
+                    val value = frame.getValue(variable)
+                    if (value is ObjectReference && isThrowableType(value.referenceType().name())) {
+                        return value
+                    }
                 }
-            }
-        } catch (e: Exception) {
-            Logger.debug("Could not get exception message: ${e.message}")
+            } catch (_: Exception) {}
         }
+        return null
+    }
 
-        // 获取堆栈跟踪
-        var stackTrace: String? = null
-        try {
-            val toStringMethod = exception.referenceType().methodsByName("toString").firstOrNull()
-            if (toStringMethod != null) {
-                // 注意：调用方法可能需要 VM 支持
-                // 这里简化处理，只使用类型名和消息
-                stackTrace = null
-            }
-        } catch (e: Exception) {
-            Logger.debug("Could not get stack trace: ${e.message}")
-        }
+    /**
+     * 检查类型名是否属于 Throwable 体系
+     */
+    private fun isThrowableType(typeName: String): Boolean =
+        typeName == "java.lang.Throwable" ||
+        typeName == "java.lang.Exception" ||
+        typeName == "java.lang.Error" ||
+        typeName == "java.lang.RuntimeException" ||
+        typeName.endsWith("Exception") ||
+        typeName.endsWith("Error")
 
-        val breakMode = "always" // 可以是 "never", "always", "unhandled", "userUnhandled"
-        val exceptionId = typeName
+    /**
+     * 构建完整的异常信息响应
+     * @param exception 异常对象引用
+     * @param thread 当前暂停的线程（用于获取栈帧作为回退）
+     */
+    private fun buildExceptionInfo(exception: ObjectReference, thread: ThreadReference): JsonObject {
+        val typeName = exception.referenceType().name()
+        val message = getExceptionMessage(exception)
+        val stackTraceStr = buildStackTrace(exception, thread, typeName, message)
+        val causeStr = buildCauseChain(exception)
+        val description = if (message != null) "$typeName: $message" else typeName
 
         return buildJsonObject {
-            put("exceptionId", exceptionId)
-            put("description", message ?: typeName)
-            put("breakMode", breakMode)
+            put("exceptionId", typeName)
+            put("description", description)
+            put("breakMode", "always")
             putJsonObject("details") {
-                put("message", message)
+                put("message", message ?: "")
                 put("typeName", typeName)
-                if (stackTrace != null) {
-                    put("stackTrace", stackTrace)
-                }
                 put("fullTypeName", typeName)
+                put("stackTrace", stackTraceStr)
+                if (causeStr != null) {
+                    put("innerException", JsonArray(listOf(buildJsonObject {
+                        put("message", causeStr)
+                    })))
+                }
             }
         }
     }
 
     /**
-     * 构建空的异常信息响应
+     * 读取异常的 detailMessage 字段（纯字段读取，不调用方法）
+     */
+    private fun getExceptionMessage(exception: ObjectReference): String? {
+        return try {
+            val field = exception.referenceType().fieldByName("detailMessage") ?: return null
+            (exception.getValue(field) as? StringReference)?.value()
+        } catch (e: Exception) {
+            Logger.debug("Could not get exception message: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 构建格式化的堆栈跟踪字符串。
+     * 优先读取异常对象的 stackTrace 字段（StackTraceElement[]），
+     * 若无法读取则回退到线程当前的 JDI 栈帧。
+     */
+    private fun buildStackTrace(
+        exception: ObjectReference,
+        thread: ThreadReference,
+        typeName: String,
+        message: String?
+    ): String {
+        val sb = StringBuilder()
+        sb.append(typeName)
+        if (message != null) sb.append(": ").append(message)
+        sb.append("\n")
+
+        // 先尝试读取 Throwable.stackTrace 字段（StackTraceElement[]）
+        val frames = readStackTraceField(exception)
+        if (frames != null && frames.isNotEmpty()) {
+            frames.forEach { sb.append("\tat ").append(it).append("\n") }
+        } else {
+            // 回退：使用线程当前 JDI 栈帧
+            try {
+                for (jdiFrame in thread.frames()) {
+                    val loc = jdiFrame.location()
+                    val clazz = loc.declaringType().name()
+                    val method = loc.method().name()
+                    val file = try { loc.sourceName() } catch (_: Exception) { "Unknown" }
+                    val line = try { loc.lineNumber() } catch (_: Exception) { -1 }
+                    val lineStr = if (line >= 0) ":$line" else ""
+                    sb.append("\tat $clazz.$method($file$lineStr)\n")
+                }
+            } catch (e: Exception) {
+                Logger.debug("Could not read thread frames: ${e.message}")
+            }
+        }
+
+        return sb.toString().trimEnd()
+    }
+
+    /**
+     * 读取 Throwable.stackTrace 字段（StackTraceElement[]）并格式化为字符串列表。
+     * 全部通过 JDI 字段访问实现，不调用任何 JVM 方法，避免死锁风险。
+     */
+    private fun readStackTraceField(exception: ObjectReference): List<String>? {
+        return try {
+            val stackTraceField = exception.referenceType().fieldByName("stackTrace") ?: return null
+            val arrayRef = exception.getValue(stackTraceField) as? ArrayReference ?: return null
+
+            arrayRef.values.mapNotNull { elem ->
+                if (elem !is ObjectReference) return@mapNotNull null
+                val steType = elem.referenceType()
+
+                fun str(name: String): String? = try {
+                    (elem.getValue(steType.fieldByName(name)) as? StringReference)?.value()
+                } catch (_: Exception) { null }
+
+                fun int(name: String): Int = try {
+                    (elem.getValue(steType.fieldByName(name)) as? IntegerValue)?.value() ?: -1
+                } catch (_: Exception) { -1 }
+
+                val clazz = str("declaringClass") ?: return@mapNotNull null
+                val method = str("methodName") ?: "<unknown>"
+                val file = str("fileName") ?: "Unknown Source"
+                val line = int("lineNumber")
+                val lineStr = if (line >= 0) ":$line" else ""
+                "$clazz.$method($file$lineStr)"
+            }.takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            Logger.debug("Could not read stackTrace field: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 构建 cause 链描述（只取第一层，避免递归过深）
+     */
+    private fun buildCauseChain(exception: ObjectReference): String? {
+        return try {
+            val causeField = exception.referenceType().fieldByName("cause") ?: return null
+            val cause = exception.getValue(causeField) as? ObjectReference ?: return null
+            // cause == this 表示未设置 cause，跳过
+            if (cause.uniqueID() == exception.uniqueID()) return null
+            val typeName = cause.referenceType().name()
+            val message = getExceptionMessage(cause)
+            if (message != null) "$typeName: $message" else typeName
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 构建空的异常信息响应（无法获取异常对象时的兜底）
      */
     private fun buildEmptyExceptionInfo(): JsonObject {
         return buildJsonObject {

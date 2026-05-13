@@ -196,3 +196,59 @@ cd test-program && ./run-debug.sh
 
 4. **测试条件断点**
    运行测试程序，输入 `cond` 命令，然后在相应位置设置条件断点进行测试。
+
+---
+
+## VSCode 扩展新功能
+
+### 内联变量值 (InlineValues)
+
+调试暂停时，编辑器自动在变量旁内联显示其当前值（无需悬停），覆盖停止行 ±10 行范围。
+
+无需任何配置，自动生效。
+
+### CodeLens 增强
+
+在 `.kt` 文件中，以下位置会显示 CodeLens 按钮：
+
+| 代码模式 | 显示按钮 |
+|----------|----------|
+| `fun main(` | `▶ Run` `Debug` |
+| `@JvmStatic fun main(` | `▶ Run` `Debug` |
+| `@Test fun testXxx(` | `▶ Run Test` `Debug Test` |
+
+点击 `Run Test` / `Debug Test` 会通过 `./gradlew test --tests "ClassName.methodName"` 运行对应测试。
+
+### 指定 Java 路径
+
+适用于多 JDK 环境，在 VS Code 设置中配置：
+
+```json
+{
+  "kotlin-debug.javaHome": "/usr/lib/jvm/java-17-openjdk"
+}
+```
+
+查找顺序：`kotlin-debug.javaHome` → `JAVA_HOME` 环境变量 → 系统 `java`
+
+### 调试前自动构建
+
+在 VS Code 设置中开启，调试会话启动前自动执行构建：
+
+```json
+{
+  "kotlin-debug.buildBeforeDebug": true
+}
+```
+
+- 存在 `gradlew` 时运行 `./gradlew classes`
+- 存在 `pom.xml` 时运行 `mvn compile -q`
+- 构建失败会弹出错误通知并取消本次调试
+
+### 异常详情
+
+调试命中异常断点后，在 VS Code "异常信息"面板中会显示：
+- 异常类型和消息
+- 完整的 Java 堆栈跟踪
+- cause 链（如果存在嵌套异常）
+

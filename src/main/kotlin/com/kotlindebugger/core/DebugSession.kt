@@ -691,4 +691,12 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
     fun isTerminated(): Boolean = state.get() == SessionState.TERMINATED
 
     fun getVirtualMachine(): VirtualMachine = vm
+
+    /**
+     * 获取最近一次触发的异常对象引用
+     * 供 ExceptionInfoHandler 直接使用，无需扫描局部变量
+     */
+    fun getLastExceptionObject(): com.sun.jdi.ObjectReference? {
+        return if (::eventHandler.isInitialized) eventHandler.getLastExceptionObject() else null
+    }
 }

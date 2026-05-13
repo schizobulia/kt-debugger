@@ -62,6 +62,18 @@
         "title": "Kotlin Debug: Refresh Coroutines",
         "category": "Kotlin Debug",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "kotlin-debug.runTest",
+        "title": "Kotlin Debug: Run Test",
+        "category": "Kotlin Debug",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "kotlin-debug.debugTest",
+        "title": "Kotlin Debug: Debug Test",
+        "category": "Kotlin Debug",
+        "icon": "$(debug-start)"
       }
     ],
     "viewsContainers": {
@@ -120,6 +132,14 @@
         {
           "command": "kotlin-debug.debugMain",
           "when": "false"
+        },
+        {
+          "command": "kotlin-debug.runTest",
+          "when": "false"
+        },
+        {
+          "command": "kotlin-debug.debugTest",
+          "when": "false"
         }
       ]
     },
@@ -151,6 +171,16 @@
             "${workspaceFolder}/src/main/java"
           ],
           "description": "Default source paths to use for resolving Kotlin files during debugging."
+        },
+        "kotlin-debug.javaHome": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the JDK home directory (e.g. /Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home). If not set, the JAVA_HOME environment variable or PATH java is used. Useful for multi-JDK environments."
+        },
+        "kotlin-debug.buildBeforeDebug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run a build (./gradlew classes or mvn compile) before starting a debug session. Ensures the compiled classes are up-to-date."
         }
       }
     },

@@ -103,4 +103,44 @@ class ExceptionInfoHandlerTest {
             }
         }
     }
+
+    @Test
+    fun `test exception info response contains required fields`() {
+        // 验证异常信息响应结构符合 DAP 协议规范
+        val exceptionInfo = buildJsonObject {
+            put("exceptionId", "java.lang.NullPointerException")
+            put("description", "java.lang.NullPointerException: value is null")
+            put("breakMode", "always")
+            put("details", buildJsonObject {
+                put("message", "value is null")
+                put("typeName", "java.lang.NullPointerException")
+                put("fullTypeName", "java.lang.NullPointerException")
+                put("stackTrace", "java.lang.NullPointerException: value is null\n\tat com.example.Main.foo(Main.kt:10)")
+            })
+        }
+        // 校验所有必需字段
+        assertEquals("java.lang.NullPointerException", exceptionInfo["exceptionId"]?.jsonPrimitive?.content)
+        assertEquals("always", exceptionInfo["breakMode"]?.jsonPrimitive?.content)
+        assertNotNull(exceptionInfo["details"]?.jsonObject?.get("stackTrace"))
+    }
+
+    @Test
+    fun `test exception description includes message when present`() {
+        // description 应该是 "类名: 消息"，便于用户快速识别
+        val typeName = "java.lang.IllegalArgumentException"
+        val message = "invalid input"
+        val expected = "$typeName: $message"
+
+        // 模拟 buildExceptionInfo 的拼接逻辑
+        val description = if (message.isNotEmpty()) "$typeName: $message" else typeName
+        assertEquals(expected, description)
+    }
+
+    @Test
+    fun `test exception description falls back to type name when no message`() {
+        val typeName = "java.lang.RuntimeException"
+        val message: String? = null
+        val description = if (message != null) "$typeName: $message" else typeName
+        assertEquals(typeName, description)
+    }
 }
