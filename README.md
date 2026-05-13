@@ -154,6 +154,13 @@ java -jar kotlin-debugger-1.0-SNAPSHOT-all.jar
 | `threads` | - | List all threads |
 | `thread <id>` | `t` | Switch to thread |
 
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [CLI User Guide](docs/CLI_GUIDE.md) | Full reference for the command-line debugger: all commands, workflows, and examples |
+| [VS Code Extension Guide](docs/VSCODE_GUIDE.md) | Complete guide to the VS Code extension: launch/attach modes, features, and configuration |
+
 ## VSCode Extension
 
 The Kotlin Debug extension for VSCode provides a graphical debugging experience.

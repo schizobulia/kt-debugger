@@ -127,6 +127,8 @@ release/
 .claude
 
 docs/*
+!docs/CLI_GUIDE.md
+!docs/VSCODE_GUIDE.md
 
 # 保留 .github/workflows 目录
 .github/copilot-instructions.md

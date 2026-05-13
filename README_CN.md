@@ -154,6 +154,13 @@ java -jar kotlin-debugger-1.0-SNAPSHOT-all.jar
 | `threads` | - | 列出所有线程 |
 | `thread <id>` | `t` | 切换到指定线程 |
 
+## 使用文档
+
+| 文档 | 说明 |
+|------|------|
+| [CLI 使用指南](docs/CLI_GUIDE.md) | 命令行调试器完整参考：所有命令、调试流程和示例 |
+| [VS Code 插件使用指南](docs/VSCODE_GUIDE.md) | VS Code 扩展完整指南：启动/附加模式、功能特性和配置说明 |
+
 ## VSCode 扩展
 
 Kotlin Debug VSCode 扩展提供图形化的调试体验。
