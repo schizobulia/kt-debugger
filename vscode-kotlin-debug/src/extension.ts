@@ -554,7 +554,6 @@ function findLogFiles(): string[] {
         for (const entry of entries) {
             if (entry.startsWith('kotlin-debugger-') && entry.endsWith('.log')) {
                 const fullPath = path.join(tempDir, entry);
-                const stats = fs.statSync(fullPath);
                 files.push(fullPath);
             }
         }
