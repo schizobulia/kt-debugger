@@ -280,7 +280,11 @@ class BreakpointManager(
 
     /**
      * 处理类加载事件
-     * 在类加载时检查是否有待设置的断点
+     * 在类加载时检查是否有待设置的断点。
+     *
+     * 注意：同一个源文件可能对应多个 JVM 类（如顶层类、伴生对象、内联函数展开类等），
+     * 断点所在行不一定属于第一个加载的类。因此只移除已成功安装的断点，
+     * 未安装的保留供后续同源文件的其他类加载时继续尝试，避免断点遗漏。
      */
     fun onClassPrepared(className: String, referenceType: ReferenceType) {
         // 检查是否有待设置的断点
@@ -292,13 +296,28 @@ class BreakpointManager(
 
         val pending = pendingBreakpoints[sourceFile] ?: return
 
+        // 收集在当前类中成功安装的断点 ID
+        val installedIds = mutableSetOf<Int>()
         pending.forEach { pendingBp ->
-            setBreakpointInClass(referenceType, pendingBp.line, pendingBp.breakpointId)
+            if (setBreakpointInClass(referenceType, pendingBp.line, pendingBp.breakpointId)) {
+                installedIds.add(pendingBp.breakpointId)
+            }
         }
 
-        // 清理待处理的断点
-        pendingBreakpoints.remove(sourceFile)
+        // 只移除已安装的断点，其余保留等待后续类加载
+        if (installedIds.isNotEmpty()) {
+            pending.removeIf { it.breakpointId in installedIds }
+            if (pending.isEmpty()) {
+                pendingBreakpoints.remove(sourceFile)
+            }
+        }
     }
+
+    /**
+     * 获取指定源文件的待处理断点数（仅用于测试）
+     */
+    internal fun getPendingBreakpointCount(sourceFile: String): Int =
+        pendingBreakpoints[sourceFile]?.size ?: 0
 
     /**
      * 尝试在已加载的类中设置断点

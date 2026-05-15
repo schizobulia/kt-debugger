@@ -916,15 +916,18 @@ class KotlinDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescript
         });
 
         // 监听进程退出事件
+        // SIGTERM 是 VSCode 调试会话结束后的正常清理信号，不视为错误；
+        // 只有非零退出码或 SIGKILL 才说明进程异常终止。
         proc.on('exit', (code, signal) => {
             if (code !== 0 && code !== null) {
                 logChannel.appendLine(`\n[Extension] ⚠️ Debugger process exited with code: ${code}`);
                 vscode.window.showErrorMessage(`Kotlin Debugger crashed with exit code: ${code}. Check 'Kotlin Debugger Logs' for details.`);
-            } else if (signal) {
+            } else if (signal && signal !== 'SIGTERM') {
+                // SIGTERM 是正常终止，其他信号（如 SIGKILL）才算异常
                 logChannel.appendLine(`\n[Extension] ⚠️ Debugger process was killed by signal: ${signal}`);
                 vscode.window.showErrorMessage(`Kotlin Debugger was killed by signal: ${signal}. Check 'Kotlin Debugger Logs' for details.`);
             } else {
-                logChannel.appendLine(`\n[Extension] Debugger process exited normally.`);
+                logChannel.appendLine(`\n[Extension] Debugger process exited normally (signal: ${signal ?? 'none'}).`);
             }
         });
 
