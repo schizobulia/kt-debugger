@@ -1,5 +1,7 @@
 package com.kotlindebugger.kotlin.smap
 
+import com.kotlindebugger.dap.Logger
+
 /**
  * SMAP 解析器
  * 解析 SourceDebugExtension 属性中的 SMAP 信息
@@ -27,7 +29,7 @@ object SMAPParser {
         return try {
             parseInternal(lines)
         } catch (e: Exception) {
-            System.err.println("Failed to parse SMAP: ${e.message}")
+            Logger.error("Failed to parse SMAP: ${e.message}")
             null
         }
     }

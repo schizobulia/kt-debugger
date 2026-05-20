@@ -57,6 +57,9 @@ class DAPServer(
         dispatcher.register(SetFunctionBreakpointsHandler(this))
         dispatcher.register(CompletionsHandler(this))
         dispatcher.register(ExceptionInfoHandler(this))
+        dispatcher.register(TerminateHandler(this))
+        dispatcher.register(BreakpointLocationsHandler(this))
+        dispatcher.register(LoadedSourcesHandler(this))
         // 协程视图支持（自定义 DAP 命令）
         dispatcher.register(GetCoroutinesHandler(this))
     }

@@ -108,11 +108,23 @@ class LaunchHandler(private val server: DAPServer) : RequestHandler {
         server.sourcePathResolver.setSourcePaths(sourcePaths)
         Logger.debug("Source paths: $sourcePaths")
 
+        // 解析工作目录配置
+        val workingDir = args["workingDir"]?.jsonPrimitive?.contentOrNull
+        Logger.debug("Working dir: $workingDir")
+
+        // 解析环境变量配置（格式：{ "KEY": "VALUE", ... }）
+        val env = args["env"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content } ?: emptyMap()
+        if (env.isNotEmpty()) {
+            Logger.debug("Env vars: ${env.keys.joinToString()}")
+        }
+
         val target = DebugTarget.Launch(
             mainClass = mainClass,
             classpath = classpath,
             jvmArgs = jvmArgs,
             programArgs = programArgs,
+            workingDir = workingDir,
+            env = env,
             suspend = !noDebug
         )
 

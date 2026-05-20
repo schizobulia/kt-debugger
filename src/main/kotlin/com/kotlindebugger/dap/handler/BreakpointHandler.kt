@@ -43,10 +43,13 @@ class SetBreakpointsHandler(private val server: DAPServer) : RequestHandler {
             val condition = bp.jsonObject["condition"]?.jsonPrimitive?.contentOrNull
             // 解析 logMessage（Logpoints: 命中时打印日志而非暂停）
             val logMessage = bp.jsonObject["logMessage"]?.jsonPrimitive?.contentOrNull
+            // 解析 hitCondition（命中次数条件，如 "5" 表示第5次命中时触发）
+            val hitCondition = bp.jsonObject["hitCondition"]?.jsonPrimitive?.contentOrNull
+            val hitCount = parseHitCondition(hitCondition)
 
             try {
-                // 使用文件名进行JDI断点设置，传递条件表达式和 logMessage
-                val breakpoint = debugSession.addBreakpoint(fileName, line, condition, logMessage)
+                // 使用文件名进行JDI断点设置，传递条件表达式、logMessage 和 hitCount
+                val breakpoint = debugSession.addBreakpoint(fileName, line, condition, logMessage, hitCount)
                 Breakpoint(
                     id = breakpoint.id,
                     verified = true,
@@ -78,4 +81,22 @@ class ConfigurationDoneHandler(private val server: DAPServer) : RequestHandler {
         server.getDebugSession()?.forceResume()
         return null
     }
+}
+
+/**
+ * 解析 DAP 协议中的 hitCondition 字符串，返回命中次数整数值。
+ * 支持格式：
+ *   "5"    → 第 5 次命中时触发
+ *   "== 5" → 第 5 次命中时触发
+ *   ">= 5" → 第 5 次命中时触发（JDI 只支持精确次数，近似处理）
+ *   "% 5"  → 每第 5 次命中时触发（JDI 只支持精确次数，近似处理）
+ */
+fun parseHitCondition(hitCondition: String?): Int {
+    if (hitCondition.isNullOrBlank()) return 0
+    val trimmed = hitCondition.trim()
+    // 纯数字
+    trimmed.toIntOrNull()?.let { return it.coerceAtLeast(0) }
+    // "== N", ">= N", "> N", "= N", "% N" 等格式
+    val match = Regex("""[=><%%]+\s*(\d+)""").find(trimmed)
+    return match?.groupValues?.get(1)?.toIntOrNull()?.coerceAtLeast(0) ?: 0
 }

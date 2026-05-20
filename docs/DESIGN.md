@@ -55,7 +55,57 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 模块划分
+### 1.2 VSCode 扩展架构
+
+```
+vscode-kotlin-debug/
+├── src/
+│   └── extension.ts          # 扩展入口（activate / deactivate）
+│       ├── KotlinDebugAdapterDescriptorFactory   # 启动 kotlin-debugger JAR
+│       ├── KotlinDebugConfigurationProvider      # launch.json 配置提供者
+│       ├── CoroutineViewProvider                 # 协程树视图
+│       ├── KotlinDebugCodeLensProvider           # main / @Test CodeLens
+│       ├── KotlinDebugHoverProvider              # 悬停变量值
+│       └── KotlinInlineValuesProvider            # 内联值显示
+└── package.json              # 语言贡献 (.kt/.kts)、命令、视图、配置定义
+```
+
+**协程视图刷新机制** (v0.3.2+):
+
+扩展通过 `DebugAdapterTracker` 拦截 DAP 消息，在每次调试器暂停（断点命中、单步完成、异常等）时自动刷新协程视图：
+
+```typescript
+vscode.debug.registerDebugAdapterTrackerFactory('kotlin', {
+    createDebugAdapterTracker(_session): vscode.DebugAdapterTracker {
+        return {
+            onDidSendMessage(message) {
+                if (message.type === 'event' && message.event === 'stopped') {
+                    coroutineViewProvider.fetchAndRefresh();
+                }
+            }
+        };
+    }
+});
+```
+
+这比 `onDidChangeActiveDebugSession` 更精确，只在真正暂停时刷新，而非每次会话切换时刷新。
+
+**Kotlin 语言贡献** (v0.3.2+):
+
+`package.json` 中注册了 `.kt` / `.kts` 文件的语言定义，无需单独安装 Kotlin 语言扩展即可获得基本的文件关联：
+
+```json
+{
+  "languages": [{
+    "id": "kotlin",
+    "aliases": ["Kotlin", "kotlin"],
+    "extensions": [".kt", ".kts"],
+    "mimetypes": ["text/x-kotlin"]
+  }]
+}
+```
+
+### 1.3 模块划分
 
 ```
 kotlin-debugger/
@@ -96,7 +146,9 @@ sealed class DebugTarget {
         val classpath: List<String>,
         val jvmArgs: List<String> = emptyList(),
         val programArgs: List<String> = emptyList(),
-        val suspend: Boolean = true  // 启动后是否先暂停
+        val workingDir: String? = null,          // 工作目录
+        val env: Map<String, String> = emptyMap(), // 额外环境变量
+        val suspend: Boolean = true               // 启动后是否先暂停
     ) : DebugTarget()
 
     data class Attach(
@@ -114,6 +166,11 @@ class DebugSession(private val target: DebugTarget) {
     fun stop() { ... }
     fun resume() { ... }
     fun suspend() { ... }
+    fun terminate() { ... }                                            // 终止被调试进程
+    fun getBreakpointLocationsForFile(file: String, start: Int, end: Int): List<Int>  // 有效断点行
+    fun getLoadedSourceNames(): List<String>                           // 已加载的源文件名
+    fun addMethodBreakpoint(className: String, methodName: String, condition: String? = null): Breakpoint
+    fun clearMethodBreakpoints()
 }
 ```
 
@@ -551,6 +608,12 @@ tasks.jar {
 - [x] 支持 VSCode 图形化调试体验
 - [x] **调试控制台表达式求值 (evaluate request)**
 - [x] **监视器 (watch) 支持**
+- [x] **命中次数断点 (hitCondition)**
+- [x] **函数断点 (setFunctionBreakpoints)**
+- [x] **终止请求 (terminate)**
+- [x] **断点位置查询 (breakpointLocations)**
+- [x] **已加载源文件列表 (loadedSources)**
+- [x] **工作目录和环境变量 (workingDir / env)**
 
 **已实现的DAP功能**:
 1. `evaluate` 请求 - 支持调试控制台和监视器的表达式求值
@@ -562,6 +625,20 @@ tasks.jar {
 2. `supportsEvaluateForHovers` - 支持鼠标悬停时显示表达式值
 3. `supportsSetVariable` - 支持修改变量值
 4. `supportsValueFormattingOptions` - 支持值格式化选项
+5. `supportsHitConditionalBreakpoints` - 通过 JDI `addCountFilter()` 实现命中次数过滤
+6. `supportsFunctionBreakpoints` - 通过 JDI `MethodEntryRequest` 实现方法断点，支持通配符 `*`
+7. `supportsTerminateRequest` - `TerminateHandler` 调用 `vm.exit(0)` 终止被调试进程
+8. `supportsBreakpointLocationsRequest` - `BreakpointLocationsHandler` 查询 JDI 有效行位置
+9. `supportsLoadedSourcesRequest` - `LoadedSourcesHandler` 枚举 JDI 已加载类的源文件名
+
+**已声明的能力 (InitializeHandler)**:
+```kotlin
+supportsFunctionBreakpoints = true
+supportsHitConditionalBreakpoints = true
+supportsBreakpointLocationsRequest = true
+supportsLoadedSourcesRequest = true
+supportsTerminateRequest = true
+```
 
 **交付物**: 支持DAP
 

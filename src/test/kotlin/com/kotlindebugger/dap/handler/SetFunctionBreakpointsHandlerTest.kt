@@ -62,7 +62,8 @@ class SetFunctionBreakpointsHandlerTest {
     }
 
     @Test
-    fun `test handler returns unverified breakpoints for function breakpoints`() = runBlocking {
+    fun `test handler returns empty breakpoints when no debug session`() = runBlocking {
+        // 没有活动的调试会话时，函数断点处理器应返回空列表（无法设置断点）
         val args = buildJsonObject {
             putJsonArray("breakpoints") {
                 add(buildJsonObject {
@@ -79,13 +80,8 @@ class SetFunctionBreakpointsHandlerTest {
         val breakpoints = resultObj["breakpoints"]?.jsonArray
         
         assertNotNull(breakpoints)
-        assertEquals(2, breakpoints?.size)
-        
-        // All breakpoints should be unverified
-        breakpoints?.forEach { bp ->
-            assertEquals(false, bp.jsonObject["verified"]?.jsonPrimitive?.boolean)
-            assertTrue(bp.jsonObject["message"]?.jsonPrimitive?.content?.contains("not supported") ?: false)
-        }
+        // 无 session 时返回空数组
+        assertEquals(0, breakpoints?.size)
     }
 
     @Test

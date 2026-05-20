@@ -2,12 +2,10 @@ package com.kotlindebugger.core.stepping
 
 import com.kotlindebugger.common.model.DebugEvent
 import com.kotlindebugger.common.model.StepType
-import com.kotlindebugger.common.util.JdiUtils
 import com.kotlindebugger.core.event.DebugEventListener
 import com.kotlindebugger.core.event.EventHandler
 import com.kotlindebugger.kotlin.position.KotlinPositionManager
 import com.sun.jdi.*
-import com.sun.jdi.event.StepEvent
 import com.sun.jdi.request.StepRequest
 
 /**
@@ -90,11 +88,6 @@ class SteppingController(
 
             StepType.STEP_OUT -> {
                 // Step Out: 跳出当前方法
-                // 查找当前方法的所有行位置，然后创建 STEP_OUT 请求
-                val method = currentLocation.method()
-                val allLocations = JdiUtils.run { method.safeAllLineLocations() }
-                val maxLine = allLocations.maxOfOrNull { JdiUtils.run { it.safeLineNumber() } } ?: Int.MAX_VALUE
-
                 vm.eventRequestManager().createStepRequest(
                     thread,
                     StepRequest.STEP_LINE,

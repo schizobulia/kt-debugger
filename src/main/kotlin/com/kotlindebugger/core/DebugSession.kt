@@ -192,7 +192,30 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
             // 忽略关闭时的错误
         }
 
+        // 如果是通过 ProcessBuilder 启动的子进程，确保其被终止
+        connector.getLaunchedProcess()?.let { process ->
+            if (process.isAlive) {
+                process.destroy()
+            }
+        }
+
         state.set(SessionState.TERMINATED)
+    }
+
+    /**
+     * 终止目标程序（对应 DAP terminate 请求）
+     * 与 stop() 不同，这里使用 vm.exit() 来正常终止 JVM，会触发 VMDeath 事件
+     */
+    fun terminate() {
+        if (state.get() == SessionState.TERMINATED) return
+        try {
+            if (::vm.isInitialized) {
+                vm.exit(0)
+            }
+        } catch (e: Exception) {
+            // 如果 exit() 失败，回退到 stop()
+            stop()
+        }
     }
 
     /**
@@ -249,8 +272,24 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
     /**
      * 添加行断点
      */
-    fun addBreakpoint(file: String, line: Int, condition: String? = null, logMessage: String? = null): Breakpoint {
-        return breakpointManager.addLineBreakpoint(file, line, condition, logMessage)
+    fun addBreakpoint(file: String, line: Int, condition: String? = null, logMessage: String? = null, hitCount: Int = 0): Breakpoint {
+        return breakpointManager.addLineBreakpoint(file, line, condition, logMessage, hitCount)
+    }
+
+    /**
+     * 添加方法断点（函数断点）
+     */
+    fun addMethodBreakpoint(className: String, methodName: String, condition: String? = null): Breakpoint {
+        return breakpointManager.addMethodBreakpoint(className, methodName, condition)
+    }
+
+    /**
+     * 清除所有方法断点
+     */
+    fun clearMethodBreakpoints() {
+        breakpointManager.listBreakpoints()
+            .filterIsInstance<com.kotlindebugger.common.model.Breakpoint.MethodBreakpoint>()
+            .forEach { removeBreakpoint(it.id) }
     }
 
     /**
@@ -366,6 +405,50 @@ class DebugSession(private val target: DebugTarget) : DebugEventListener {
             value = JdiUtils.run { value.toDisplayString() },
             isLocal = true
         )
+    }
+
+    // ==================== 元数据查询 ====================
+
+    /**
+     * 获取指定源文件在给定行范围内的有效断点位置
+     */
+    fun getBreakpointLocationsForFile(fileName: String, startLine: Int, endLine: Int): List<Int> {
+        if (!::vm.isInitialized) return emptyList()
+        val validLines = mutableSetOf<Int>()
+        for (refType in vm.allClasses()) {
+            try {
+                if (refType.sourceName() == fileName) {
+                    for (line in startLine..endLine) {
+                        try {
+                            if (refType.locationsOfLine(line).isNotEmpty()) {
+                                validLines.add(line)
+                            }
+                        } catch (e: com.sun.jdi.AbsentInformationException) {
+                            // 该行无调试信息，跳过
+                        }
+                    }
+                }
+            } catch (e: com.sun.jdi.AbsentInformationException) {
+                // 该类无源文件信息，跳过
+            }
+        }
+        return validLines.sorted()
+    }
+
+    /**
+     * 获取已加载的所有源文件名称
+     */
+    fun getLoadedSourceNames(): List<String> {
+        if (!::vm.isInitialized) return emptyList()
+        val names = mutableSetOf<String>()
+        for (refType in vm.allClasses()) {
+            try {
+                names.add(refType.sourceName())
+            } catch (e: com.sun.jdi.AbsentInformationException) {
+                // 无源信息的类，跳过
+            }
+        }
+        return names.toList()
     }
 
     // ==================== 线程管理 ====================

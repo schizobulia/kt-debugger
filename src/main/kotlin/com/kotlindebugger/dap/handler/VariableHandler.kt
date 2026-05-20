@@ -241,13 +241,20 @@ class VariablesHandler(private val server: DAPServer) : RequestHandler {
             return emptyList()
         }
 
+        // 获取数组元素的组件类型名（如 int[], 取 int）
+        val componentTypeName = try {
+            (arrayRef.type() as? com.sun.jdi.ArrayType)?.componentTypeName() ?: arrayRef.type().name()
+        } catch (e: Exception) {
+            arrayRef.type().name()
+        }
+
         val values = arrayRef.getValues(start, actualCount)
         return values.mapIndexed { index, value ->
             Variable(
                 name = "[${start + index}]",
                 value = formatValue(value),
-                type = arrayRef.type().name(),
-                variablesReference = 0  // 数组元素不再展开
+                type = componentTypeName,
+                variablesReference = createVariableReference(value)  // 对象元素可展开
             )
         }
     }

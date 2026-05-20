@@ -16,7 +16,7 @@ class InitializeHandler : RequestHandler {
     override suspend fun handle(args: JsonObject?, session: DebugSession?): JsonElement {
         val capabilities = Capabilities(
             supportsConfigurationDoneRequest = true,
-            supportsFunctionBreakpoints = false,
+            supportsFunctionBreakpoints = true,
             supportsConditionalBreakpoints = true,
             supportsEvaluateForHovers = true,
             supportsStepBack = false,
@@ -29,6 +29,14 @@ class InitializeHandler : RequestHandler {
             supportsHotCodeReplace = true,
             // 声明支持 Logpoints
             supportsLogPoints = true,
+            // 声明支持命中次数断点
+            supportsHitConditionalBreakpoints = true,
+            // 声明支持 breakpointLocations 请求
+            supportsBreakpointLocationsRequest = true,
+            // 声明支持 loadedSources 请求
+            supportsLoadedSourcesRequest = true,
+            // 声明支持 terminate 请求
+            supportsTerminateRequest = true,
             exceptionBreakpointFilters = listOf(
                 ExceptionBreakpointsFilter(
                     filter = "caught",

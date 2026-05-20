@@ -9,6 +9,7 @@ import kotlinx.coroutines.*
 fun main() {
     println("=== Kotlin Debug Test Program ===")
     println("Commands: calc, list, random, inline, nested, reified, lambda, loop, eval, cond, coroutines, logpoint, quit")
+    println("New: hitcond, funcbp, envtest")
     println()
 
     val scanner = Scanner(System.`in`)
@@ -73,6 +74,15 @@ fun main() {
             }
             input == "inline-values" -> {
                 testInlineValues()
+            }
+            input == "hitcond" -> {
+                testHitConditionBreakpoint()
+            }
+            input == "funcbp" -> {
+                testFunctionBreakpoint()
+            }
+            input == "envtest" -> {
+                testEnvironmentVariables()
             }
             input == "help" || input == "?" -> {
                 printHelp()
@@ -856,4 +866,88 @@ class JvmStaticInlineExample {
             println("Inline @JvmStatic example")
         }
     }
+}
+
+// ==================== 新功能测试 ====================
+
+/**
+ * 测试命中次数断点（hitCondition）
+ * 在调试器中：
+ *   1. 在循环内的代码行设置断点
+ *   2. 在断点设置中填写 hitCondition = "5"（第5次才暂停）
+ *   3. 执行此函数，应该在第5次循环时才暂停
+ */
+fun testHitConditionBreakpoint() {
+    println("=== Hit Condition Breakpoint Test ===")
+    println("Set a breakpoint on the 'result' line below with hitCondition=5")
+    println("The debugger should pause only on the 5th iteration.")
+    println()
+
+    for (i in 1..10) {
+        val result = i * i        // <-- 设置断点, hitCondition="5"
+        Thread.sleep(100)
+        println("  Iteration $i: $result")
+    }
+
+    println("=== Hit Condition Test Complete ===")
+}
+
+/**
+ * 测试函数断点（Function Breakpoints）
+ * 在调试器中：
+ *   1. 在 VS Code 的 BREAKPOINTS 面板点击 + 按钮
+ *   2. 输入函数名格式: "InteractiveTestKt.targetMethod" 或只输入 "targetMethod"
+ *   3. 运行此函数，应在进入 targetMethod 时暂停
+ */
+fun testFunctionBreakpoint() {
+    println("=== Function Breakpoint Test ===")
+    println("Add a function breakpoint: 'InteractiveTestKt.targetMethod'")
+    println("Or just: 'targetMethod'")
+    println()
+
+    println("Calling targetMethod...")
+    val result = targetMethod(42)     // <-- 函数断点应在进入 targetMethod 时触发
+    println("Result: $result")
+
+    println("Calling targetMethod again...")
+    val result2 = targetMethod(100)
+    println("Result2: $result2")
+
+    println("=== Function Breakpoint Test Complete ===")
+}
+
+/** 函数断点目标函数 */
+fun targetMethod(value: Int): Int {
+    val squared = value * value   // 函数断点应该在这里暂停
+    val incremented = squared + 1
+    return incremented
+}
+
+/**
+ * 测试环境变量和工作目录（workingDir/env 支持）
+ * 启动时可在 launch.json 配置:
+ *   "workingDir": "/path/to/working/dir"
+ *   "env": { "MY_VAR": "hello", "DEBUG_MODE": "true" }
+ * 运行此函数验证配置生效
+ */
+fun testEnvironmentVariables() {
+    println("=== Environment Variables & Working Directory Test ===")
+    println()
+
+    val workingDir = System.getProperty("user.dir")
+    println("Working Directory: $workingDir")
+
+    val myVar = System.getenv("MY_VAR")
+    val debugMode = System.getenv("DEBUG_MODE")
+    println("MY_VAR = ${myVar ?: "(not set)"}")        // <-- 断点: 查看 myVar
+    println("DEBUG_MODE = ${debugMode ?: "(not set)"}")
+
+    // 列出所有自定义环境变量（非系统变量）
+    val customVars = System.getenv().filter { (k, _) ->
+        k in listOf("MY_VAR", "DEBUG_MODE", "CUSTOM_VAR")
+    }
+    println("Custom env vars: $customVars")
+
+    println()
+    println("=== Environment Variables Test Complete ===")
 }

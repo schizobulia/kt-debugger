@@ -181,6 +181,30 @@ Supported condition syntax:
 | Method call | `list.isEmpty()` |
 | Null check | `obj != null` |
 
+#### Hit Count (Hit Condition) Breakpoints
+Right-click a breakpoint → **"Edit Breakpoint..."** → choose **Hit Count**. The program only pauses when the breakpoint has been hit the specified number of times.
+
+Supported hit condition formats:
+
+| Format | Meaning |
+|--------|---------|
+| `5` | Pause on the 5th hit |
+| `== 5` | Pause on the 5th hit |
+| `>= 5` | Pause starting from the 5th hit |
+| `> 5` | Pause after the 5th hit |
+
+> Useful for debugging inside loops — set a hit count to skip the first N iterations.
+
+#### Function Breakpoints
+In the **"BREAKPOINTS"** section of the **"Run and Debug"** sidebar, click **"+ Add Function Breakpoint"** and enter a function name. The debugger pauses whenever that function is entered.
+
+Supported name formats:
+
+| Format | Example | Meaning |
+|--------|---------|---------|
+| `ClassName.methodName` | `MainKt.compute` | Pause when `MainKt.compute()` is entered |
+| `methodName` (no class) | `compute` | Pause when any `compute()` method is entered |
+
 #### Logpoints
 Right-click a breakpoint → **"Edit Breakpoint..."** → choose **Log Message**. Prints a log message when hit, **without pausing** the program.
 
@@ -274,7 +298,7 @@ The panel shows all coroutines with:
 - Dispatcher information
 - Call stack frames (click a frame to jump to the corresponding source)
 
-Click the refresh icon in the panel header, or run **"Kotlin Debug: Refresh Coroutines"** from the Command Palette to manually refresh the list.
+The panel **refreshes automatically** each time the debugger pauses (breakpoint hit, step completed, exception, etc.) — powered by `DebugAdapterTracker` intercepting DAP `stopped` events. You can also click the refresh icon in the panel header or run **"Kotlin Debug: Refresh Coroutines"** from the Command Palette to refresh manually.
 
 > Requires the target program to depend on the `kotlinx.coroutines` library.
 

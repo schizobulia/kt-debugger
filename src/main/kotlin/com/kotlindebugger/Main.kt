@@ -47,7 +47,7 @@ fun main(args: Array<String>) {
         }
 
         Logger.setLogFile(logFilePath!!)
-        System.err.println("Debug log file: $logFilePath")
+        Logger.info("Debug log file: $logFilePath")
     }
 
     // 检查是否是 DAP 模式

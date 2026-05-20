@@ -91,5 +91,13 @@ data class Capabilities(
     val supportsHotCodeReplace: Boolean = false,
     // 支持 Logpoints（带日志消息的断点，命中时打印日志而非暂停）
     val supportsLogPoints: Boolean = false,
+    // 支持 hitCondition（命中次数断点）
+    val supportsHitConditionalBreakpoints: Boolean = false,
+    // 支持 breakpointLocations 请求
+    val supportsBreakpointLocationsRequest: Boolean = false,
+    // 支持 loadedSources 请求
+    val supportsLoadedSourcesRequest: Boolean = false,
+    // 支持 terminate 请求（终止被调试进程）
+    val supportsTerminateRequest: Boolean = false,
     val exceptionBreakpointFilters: List<ExceptionBreakpointsFilter>? = null
 )

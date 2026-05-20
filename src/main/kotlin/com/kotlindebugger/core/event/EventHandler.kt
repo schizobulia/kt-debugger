@@ -5,6 +5,7 @@ import com.kotlindebugger.common.util.JdiUtils.safeLineNumber
 import com.kotlindebugger.common.util.JdiUtils.safeSourceName
 import com.kotlindebugger.common.util.JdiUtils.getThreadStatus
 import com.kotlindebugger.core.breakpoint.ConditionEvaluator
+import com.kotlindebugger.dap.Logger
 import com.sun.jdi.*
 import com.sun.jdi.event.*
 import com.sun.jdi.request.BreakpointRequest
@@ -138,7 +139,7 @@ class EventHandler(private val vm: VirtualMachine) {
                             try {
                                 listener.onEvent(debugEvent)
                             } catch (e: Exception) {
-                                System.err.println("Error in event listener: ${e.message}")
+                                Logger.error("Error in event listener: ${e.message}")
                             }
                         }
 
@@ -169,7 +170,7 @@ class EventHandler(private val vm: VirtualMachine) {
                 break
             } catch (e: Exception) {
                 if (running.get()) {
-                    System.err.println("Error processing event: ${e.message}")
+                    Logger.error("Error processing event: ${e.message}")
                 }
             }
         }
@@ -193,7 +194,7 @@ class EventHandler(private val vm: VirtualMachine) {
                     val conditionMet = try {
                         conditionEvaluator.evaluate(condition, event.thread(), location)
                     } catch (e: Exception) {
-                        System.err.println("Error evaluating breakpoint condition: ${e.message}")
+                        Logger.error("Error evaluating breakpoint condition: ${e.message}")
                         true // 如果条件评估失败，默认停止
                     }
                     
@@ -368,7 +369,7 @@ class EventHandler(private val vm: VirtualMachine) {
             try {
                 listener.onEvent(event)
             } catch (e: Exception) {
-                System.err.println("Error in event listener: ${e.message}")
+                Logger.error("Error in event listener: ${e.message}")
             }
         }
     }

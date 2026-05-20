@@ -4,6 +4,7 @@ import com.kotlindebugger.common.model.Breakpoint
 import com.kotlindebugger.common.model.SourcePosition
 import com.kotlindebugger.common.util.JdiUtils.safeLocationsOfLine
 import com.kotlindebugger.core.event.EventHandler
+import com.kotlindebugger.dap.Logger
 import com.kotlindebugger.kotlin.inline.InlineBreakpointManager
 import com.kotlindebugger.kotlin.inline.InlineDebugInfoTracker
 import com.kotlindebugger.kotlin.smap.SMAPCache
@@ -100,7 +101,9 @@ class BreakpointManager(
         val line: Int,
         val condition: String?,
         // Logpoint 消息模板
-        val logMessage: String? = null
+        val logMessage: String? = null,
+        // 命中次数过滤（>0 表示应用 hitCount 过滤）
+        val hitCount: Int = 0
     )
 
     /**
@@ -109,9 +112,10 @@ class BreakpointManager(
      * @param line 行号
      * @param condition 条件表达式（可选）
      * @param logMessage Logpoint 消息模板（可选，设置后命中时打印日志而非暂停）
+     * @param hitCount 命中次数（>0 表示在第 N 次命中时才触发）
      * @return 创建的断点，如果无法创建则返回 null
      */
-    fun addLineBreakpoint(file: String, line: Int, condition: String? = null, logMessage: String? = null): Breakpoint {
+    fun addLineBreakpoint(file: String, line: Int, condition: String? = null, logMessage: String? = null, hitCount: Int = 0): Breakpoint {
         val id = nextId.getAndIncrement()
         val breakpoint = Breakpoint.LineBreakpoint(
             id = id,
@@ -119,6 +123,7 @@ class BreakpointManager(
             line = line,
             enabled = true,
             condition = condition,
+            hitCount = hitCount,
             logMessage = logMessage
         )
 
@@ -130,7 +135,7 @@ class BreakpointManager(
 
         if (!classesSet) {
             // 如果没有找到匹配的类，添加到待处理列表
-            addPendingBreakpoint(file, id, line, condition, logMessage)
+            addPendingBreakpoint(file, id, line, condition, logMessage, hitCount)
         }
 
         return breakpoint
@@ -367,18 +372,24 @@ class BreakpointManager(
         // 获取断点条件和 Logpoint 消息
         val condition = entry.breakpoint.condition
         val logMessage = (entry.breakpoint as? Breakpoint.LineBreakpoint)?.logMessage
+        // 获取 hitCount （命中次数过滤）
+        val hitCount = (entry.breakpoint as? Breakpoint.LineBreakpoint)?.hitCount ?: 0
 
         for (location in locations) {
             try {
                 val request = vm.eventRequestManager().createBreakpointRequest(location)
                 request.setSuspendPolicy(com.sun.jdi.request.EventRequest.SUSPEND_ALL)
+                // 如果设置了 hitCount，添加命中次数过滤
+                if (hitCount > 0) {
+                    request.addCountFilter(hitCount)
+                }
                 request.enable()
 
                 entry.requests.add(request)
                 // 传递条件和 logMessage 信息给事件处理器
                 eventHandler.registerBreakpoint(request, breakpointId, condition, logMessage)
             } catch (e: Exception) {
-                System.err.println("Failed to create breakpoint request: ${e.message}")
+                Logger.error("Failed to create breakpoint request: ${e.message}")
             }
         }
 
@@ -387,12 +398,20 @@ class BreakpointManager(
 
     /**
      * 尝试设置方法断点
+     * className 为 "*" 时搜索所有已加载的类
      */
     private fun trySetMethodBreakpoint(className: String, methodName: String, breakpointId: Int): Boolean {
-        val refTypes = vm.classesByName(className)
+        val refTypes = if (className == "*") {
+            vm.allClasses()
+        } else {
+            vm.classesByName(className)
+        }
+
         if (refTypes.isEmpty()) {
             // 类未加载，添加类准备监听
-            addClassPrepareRequest(className)
+            if (className != "*") {
+                addClassPrepareRequest(className)
+            }
             return false
         }
 
@@ -420,9 +439,9 @@ class BreakpointManager(
     /**
      * 添加待处理断点
      */
-    private fun addPendingBreakpoint(file: String, breakpointId: Int, line: Int, condition: String?, logMessage: String? = null) {
+    private fun addPendingBreakpoint(file: String, breakpointId: Int, line: Int, condition: String?, logMessage: String? = null, hitCount: Int = 0) {
         pendingBreakpoints.computeIfAbsent(file) { mutableListOf() }
-            .add(PendingBreakpoint(breakpointId, line, condition, logMessage))
+            .add(PendingBreakpoint(breakpointId, line, condition, logMessage, hitCount))
         // 全局 ClassPrepareRequest 已在初始化时设置，无需再次添加
     }
 

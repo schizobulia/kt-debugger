@@ -1,5 +1,6 @@
 package com.kotlindebugger.core.breakpoint
 
+import com.kotlindebugger.dap.Logger
 import com.sun.jdi.*
 
 /**
@@ -32,7 +33,7 @@ class ConditionEvaluator(private val vm: VirtualMachine) {
             val frame = thread.frame(0)
             evaluateCondition(condition.trim(), frame)
         } catch (e: Exception) {
-            System.err.println("Error evaluating condition '$condition': ${e.message}")
+            Logger.error("Error evaluating condition '$condition': ${e.message}")
             // 如果条件无法评估，默认停止（保守策略）
             true
         }
@@ -96,7 +97,7 @@ class ConditionEvaluator(private val vm: VirtualMachine) {
         val rightNum = toNumber(rightValue)
         
         if (leftNum == null || rightNum == null) {
-            System.err.println("Cannot compare non-numeric values: $leftExpr $operator $rightExpr")
+            Logger.warn("Cannot compare non-numeric values: $leftExpr $operator $rightExpr")
             return true
         }
         
@@ -312,7 +313,7 @@ class ConditionEvaluator(private val vm: VirtualMachine) {
                 ObjectReference.INVOKE_SINGLE_THREADED
             )
         } catch (e: Exception) {
-            System.err.println("Error invoking method $methodName: ${e.message}")
+            Logger.error("Error invoking method $methodName: ${e.message}")
             null
         }
     }
