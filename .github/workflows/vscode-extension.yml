@@ -1,4 +1,4 @@
-name: VSCode Extension - Build and Publish
+name: VSCode Extension - Build and Package
 
 on:
   push:
@@ -16,17 +16,6 @@ on:
     paths:
       - 'vscode-kotlin-debug/**'
   workflow_dispatch:
-    inputs:
-      publish:
-        description: 'Publish to VSCode Marketplace'
-        required: false
-        type: boolean
-        default: false
-      pre_release:
-        description: 'Publish as pre-release'
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   build-jar:
@@ -98,6 +87,8 @@ jobs:
         working-directory: ./vscode-kotlin-debug
         run: |
           mkdir -p dist
+          # 使用 docs/VSCODE_GUIDE.md 作为插件市场 README
+          cp ../docs/VSCODE_GUIDE.md README.md
           npx vsce package --out ./dist/
 
       - name: Upload VSIX artifact
@@ -106,48 +97,6 @@ jobs:
           name: vscode-extension
           path: vscode-kotlin-debug/dist/*.vsix
           retention-days: 30
-
-  publish-extension:
-    name: Publish to VSCode Marketplace
-    needs: build-extension
-    runs-on: ubuntu-latest
-    # 只在推送 tag 或手动触发发布时执行
-    if: |
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')
-    steps:
-      - name: Download VSIX artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: vscode-extension
-          path: ./dist/
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install vsce
-        run: npm install -g @vscode/vsce
-
-      - name: Get VSIX file
-        id: vsix
-        run: |
-          VSIX_FILE=$(ls -1 ./dist/*.vsix | head -n1)
-          echo "file=$VSIX_FILE" >> $GITHUB_OUTPUT
-          echo "Found VSIX: $VSIX_FILE"
-
-      - name: Publish to Marketplace
-        if: github.event.inputs.pre_release != 'true'
-        run: vsce publish --packagePath ${{ steps.vsix.outputs.file }} -p ${{ secrets.VSCE_PAT }}
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-
-      - name: Publish Pre-release to Marketplace
-        if: github.event.inputs.pre_release == 'true'
-        run: vsce publish --pre-release --packagePath ${{ steps.vsix.outputs.file }} -p ${{ secrets.VSCE_PAT }}
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
   create-release:
     name: Create GitHub Release

@@ -111,9 +111,11 @@ Launch mode parameters:
 | `cwd` | | `"${workspaceFolder}"` | Working directory for the command |
 | `env` | | `{}` | Additional environment variables |
 | `sourcePaths` | | `[]` | Kotlin source paths (used for breakpoint mapping) |
-| `preLaunchWait` | | `10000` | Timeout (ms) to wait for the app to start; the extension polls the port automatically |
+| `preLaunchWait` | | `kotlin-debug.defaultPreLaunchWait` | Timeout (ms) to wait for the app to start; the extension polls the port automatically |
 
 > **How it works**: The extension runs `command` in a terminal named "Kotlin Debug Target", polls `host:port` until the port is open, then attaches via DAP.
+
+> **Application takes a long time to start?** The default port polling timeout is controlled by the `kotlin-debug.defaultPreLaunchWait` global setting (default: 30 seconds). You can increase it in VS Code settings, or override it per-session by adding `"preLaunchWait": 60000` (e.g. 60 s) to your `launch.json` configuration.
 
 ### Attach Mode
 
@@ -359,6 +361,8 @@ Search `kotlin-debug` in VS Code settings (`Cmd+,`) to configure:
 | `kotlin-debug.enableCodeLens` | boolean | `true` | Show CodeLens buttons above `main` functions and `@Test` methods |
 | `kotlin-debug.enableHoverEvaluation` | boolean | `true` | Show variable values on hover during debugging |
 | `kotlin-debug.defaultSourcePaths` | string[] | `["${workspaceFolder}/src/main/kotlin"]` | Default source paths used when not specified in `launch.json` |
+| `kotlin-debug.enableDapLogging` | boolean | `false` | Enable detailed DAP protocol message logging in the output panel. Disabled by default. Enable only when troubleshooting debugger connection issues. |
+| `kotlin-debug.defaultPreLaunchWait` | number | `30000` | Default time (ms) to poll the debug port in launch mode before attaching. Increase if your application takes a long time to start. Per-session override: `preLaunchWait` in `launch.json`. |
 
 **Example (`settings.json`):**
 
@@ -371,7 +375,9 @@ Search `kotlin-debug` in VS Code settings (`Cmd+,`) to configure:
   "kotlin-debug.defaultSourcePaths": [
     "${workspaceFolder}/src/main/kotlin",
     "${workspaceFolder}/src/test/kotlin"
-  ]
+  ],
+  "kotlin-debug.enableDapLogging": false,
+  "kotlin-debug.defaultPreLaunchWait": 60000
 }
 ```
 

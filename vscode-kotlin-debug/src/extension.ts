@@ -10,6 +10,15 @@ let logChannel: vscode.OutputChannel;
 let logFileWatcher: fs.StatWatcher | undefined;
 let watchedLogFile: string | undefined;
 
+/**
+ * 只在 enableDapLogging=true 时写入输出面板（verbose 诊断日志）
+ */
+function logVerbose(message: string) {
+    if (vscode.workspace.getConfiguration('kotlin-debug').get<boolean>('enableDapLogging', false)) {
+        logChannel.appendLine(message);
+    }
+}
+
 // 用于跟踪通过launch模式启动的应用终端
 let activeTerminal: vscode.Terminal | undefined;
 
@@ -151,9 +160,12 @@ export function activate(context: vscode.ExtensionContext) {
             if (session.type === 'kotlin') {
                 isDebugging = true;
                 updateStatusBar('debugging');
-                logChannel.show(true);
-                logChannel.appendLine('=== Debug Session Started ===');
-                logChannel.appendLine('Waiting for log file to be created...\n');
+                const enableDapLogging = vscode.workspace.getConfiguration('kotlin-debug').get<boolean>('enableDapLogging', false);
+                if (enableDapLogging) {
+                    logChannel.show(true);
+                    logChannel.appendLine('=== Debug Session Started ===');
+                    logChannel.appendLine('Waiting for log file to be created...\n');
+                }
 
                 // 开始监控日志文件
                 startLogFileWatcher();
@@ -174,7 +186,7 @@ export function activate(context: vscode.ExtensionContext) {
             if (session.type === 'kotlin') {
                 isDebugging = false;
                 updateStatusBar('ready');
-                logChannel.appendLine('\n=== Debug Session Ended ===');
+                logVerbose('\n=== Debug Session Ended ===');
                 stopLogFileWatcher();
                 stopLaunchedApp();
                 // 清空协程视图
@@ -484,7 +496,7 @@ async function debugMainFunction(args: { file: string, line: number }) {
  */
 function stopLaunchedApp() {
     if (activeTerminal) {
-        logChannel.appendLine('[Extension] Disposing debug terminal...');
+        logVerbose('[Extension] Disposing debug terminal...');
         activeTerminal.dispose();
         activeTerminal = undefined;
     }
@@ -494,6 +506,12 @@ function stopLaunchedApp() {
  * 开始监控日志文件
  */
 function startLogFileWatcher() {
+    // enableDapLogging=false 时不监控日志文件，避免输出噪音
+    const enableDapLogging = vscode.workspace.getConfiguration('kotlin-debug').get<boolean>('enableDapLogging', false);
+    if (!enableDapLogging) {
+        return;
+    }
+
     // 停止之前的watcher
     stopLogFileWatcher();
 
@@ -508,25 +526,31 @@ function startLogFileWatcher() {
             // 保存当前监控的文件路径
             watchedLogFile = latestLogFile;
 
-            // 监控文件变化
-            logFileWatcher = fs.watchFile(latestLogFile, { interval: 100 }, () => {
+            // 记录已读取的字节位置，避免重复追加
+            let readPos = 0;
+
+            const readNewContent = () => {
                 try {
-                    const content = fs.readFileSync(latestLogFile, 'utf-8');
-                    logChannel.append(content);
+                    const stat = fs.statSync(latestLogFile);
+                    if (stat.size <= readPos) {
+                        return;
+                    }
+                    const fd = fs.openSync(latestLogFile, 'r');
+                    const buf = Buffer.alloc(stat.size - readPos);
+                    fs.readSync(fd, buf, 0, buf.length, readPos);
+                    fs.closeSync(fd);
+                    readPos = stat.size;
+                    logChannel.append(buf.toString('utf-8'));
                 } catch (error) {
                     // 文件可能被删除
                 }
-            });
+            };
+
+            // 监控文件变化
+            logFileWatcher = fs.watchFile(latestLogFile, { interval: 100 }, readNewContent);
 
             // 读取初始内容
-            try {
-                const initialContent = fs.readFileSync(latestLogFile, 'utf-8');
-                if (initialContent) {
-                    logChannel.append(initialContent);
-                }
-            } catch (error) {
-                // 文件可能还没有创建
-            }
+            readNewContent();
         }
     }, 1000); // 延迟1秒等待日志文件创建
 }
@@ -675,7 +699,7 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
             return defaultPaths;
         }
 
-        logChannel.appendLine(`[Extension] Auto-detected source paths: ${sourcePaths.join(', ')}`);
+        logVerbose(`[Extension] Auto-detected source paths: ${sourcePaths.join(', ')}`);
         return sourcePaths;
     }
 
@@ -686,11 +710,12 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
         const command = this.resolvePath(config.command as string, folder);
         const cwd = this.resolvePath(config.cwd || '${workspaceFolder}', folder);
         const env = config.env || {};
-        const preLaunchWait = config.preLaunchWait || 10000;
+        const globalConfig = vscode.workspace.getConfiguration('kotlin-debug');
+        const preLaunchWait = config.preLaunchWait || globalConfig.get<number>('defaultPreLaunchWait', 30000);
 
-        logChannel.appendLine(`[Extension] Launching application in terminal with command: ${command}`);
-        logChannel.appendLine(`[Extension] Working directory: ${cwd}`);
-        logChannel.appendLine(`[Extension] Pre-launch wait: ${preLaunchWait}ms`);
+        logVerbose(`[Extension] Launching application in terminal with command: ${command}`);
+        logVerbose(`[Extension] Working directory: ${cwd}`);
+        logVerbose(`[Extension] Pre-launch wait: ${preLaunchWait}ms`);
 
         try {
             // 停止之前的终端
@@ -712,7 +737,7 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
             activeTerminal.sendText(command);
 
             // 等待应用程序启动并开始监听调试端口
-            logChannel.appendLine(`[Extension] Waiting for application to start and open debug port ${config.port}...`);
+            logVerbose(`[Extension] Waiting for application to start and open debug port ${config.port}...`);
 
             const port = config.port as number;
             const host = config.host || 'localhost';
@@ -726,7 +751,7 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
                 const isPortOpen = await this.checkPort(host, port);
                 if (isPortOpen) {
                     portReady = true;
-                    logChannel.appendLine(`[Extension] Debug port ${port} is now open`);
+                    logVerbose(`[Extension] Debug port ${port} is now open`);
                     break;
                 }
 
@@ -737,7 +762,7 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
                 logChannel.appendLine(`[Extension] Warning: Could not verify debug port ${port} is open, attempting to attach anyway...`);
             }
 
-            logChannel.appendLine('[Extension] Application started, attaching debugger...');
+            logVerbose('[Extension] Application started, attaching debugger...');
             return true;
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -811,7 +836,7 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
             return true;
         }
 
-        logChannel.appendLine(`[Extension] Pre-debug build: ${buildCmd}`);
+        logVerbose(`[Extension] Pre-debug build: ${buildCmd}`);
 
         return vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: 'Building before debug...', cancellable: false },
@@ -825,7 +850,7 @@ class KotlinDebugConfigurationProvider implements vscode.DebugConfigurationProvi
                         );
                         resolve(false);
                     } else {
-                        logChannel.appendLine(`[Extension] Pre-debug build succeeded.`);
+                        logVerbose(`[Extension] Pre-debug build succeeded.`);
                         resolve(true);
                     }
                 });
@@ -888,19 +913,25 @@ class KotlinDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescript
         }
 
         console.log(`Using kotlin-debugger JAR: ${jarPath}`);
-        logChannel.appendLine(`[Extension] Using kotlin-debugger JAR: ${jarPath}`);
+        logVerbose(`[Extension] Using kotlin-debugger JAR: ${jarPath}`);
 
         // 解析 java 可执行文件路径（支持 javaHome 配置）
         const javaExecutable = this.resolveJavaExecutable();
-        logChannel.appendLine(`[Extension] Using Java executable: ${javaExecutable}`);
+        logVerbose(`[Extension] Using Java executable: ${javaExecutable}`);
 
-        // 使用 java 启动 DAP 服务器，启用调试模式
+        // 使用 java 启动 DAP 服务器，根据配置决定是否启用调试日志
+        const debugConfig = vscode.workspace.getConfiguration('kotlin-debug');
+        const enableDapLogging = debugConfig.get<boolean>('enableDapLogging', false);
+
         const args = [
             '-jar',
             jarPath,
             '--dap',
-            '--debug'
         ];
+
+        if (enableDapLogging) {
+            args.push('--debug');
+        }
 
         // 手动启动进程以便捕获 stderr 和崩溃信息
         this.debuggerProcess = cp.spawn(javaExecutable, args, {
@@ -910,9 +941,15 @@ class KotlinDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescript
         const proc = this.debuggerProcess;
 
         // 捕获 stderr 输出（错误日志和崩溃信息）
+        // enableDapLogging=false 时只记录 ERROR 级别（含 "ERROR" 关键字），过滤掉 INFO/DEBUG 噪音
         proc.stderr?.on('data', (data: Buffer) => {
             const message = data.toString();
-            logChannel.appendLine(`[Debugger STDERR] ${message}`);
+            if (enableDapLogging) {
+                logChannel.appendLine(`[Debugger STDERR] ${message}`);
+            } else if (/ERROR|WARN|Exception|Exception in thread|at com\.|at java\./i.test(message)) {
+                // 仅保留错误/警告信息，过滤掉普通 INFO 运行日志
+                logChannel.appendLine(`[Debugger STDERR] ${message}`);
+            }
         });
 
         // 监听进程退出事件

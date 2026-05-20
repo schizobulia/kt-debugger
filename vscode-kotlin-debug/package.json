@@ -2,7 +2,7 @@
   "name": "kotlin-debug",
   "displayName": "Kotlin Debug",
   "description": "Kotlin debugger for VSCode using kotlin-debugger DAP",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "schizobulia",
   "license": "MIT",
   "repository": {
@@ -181,6 +181,16 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically run a build (./gradlew classes or mvn compile) before starting a debug session. Ensures the compiled classes are up-to-date."
+        },
+        "kotlin-debug.enableDapLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable detailed DAP (Debug Adapter Protocol) message logging in the output panel. Disabled by default to keep the output clean. Enable this only when troubleshooting debugger connection issues."
+        },
+        "kotlin-debug.defaultPreLaunchWait": {
+          "type": "number",
+          "default": 30000,
+          "description": "Default time in milliseconds to wait for the application to become ready in launch mode (port polling). Can be overridden per-session with the preLaunchWait property in launch.json."
         }
       }
     },
@@ -241,8 +251,7 @@
               },
               "preLaunchWait": {
                 "type": "number",
-                "description": "Time in milliseconds to wait after starting the command before attaching (default: 2000)",
-                "default": 2000
+                "description": "Time in milliseconds to poll the debug port before attaching. Defaults to the kotlin-debug.defaultPreLaunchWait global setting (30000 ms). Increase this if your application takes a long time to start."
               }
             }
           },

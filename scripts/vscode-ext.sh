@@ -166,6 +166,15 @@ package_extension() {
         print_info "请先运行: $0 build"
         exit 1
     fi
+
+    # 使用 docs/VSCODE_GUIDE.md 作为插件市场的 README
+    GUIDE_SOURCE="$PROJECT_ROOT/docs/VSCODE_GUIDE.md"
+    README_BACKUP="$VSCODE_EXT_DIR/README.md.bak"
+    if [ -f "$GUIDE_SOURCE" ]; then
+        print_info "使用 docs/VSCODE_GUIDE.md 作为扩展 README..."
+        cp "$VSCODE_EXT_DIR/README.md" "$README_BACKUP"
+        cp "$GUIDE_SOURCE" "$VSCODE_EXT_DIR/README.md"
+    fi
     
     # 打包
     VSIX_FILE=$(vsce package --out ./dist/ 2>&1 | grep -oE 'kotlin-debug-[0-9]+\.[0-9]+\.[0-9]+\.vsix')
@@ -183,6 +192,12 @@ package_extension() {
     # 显示包内容
     print_info "包大小:"
     ls -lh ./dist/*.vsix 2>/dev/null || true
+
+    # 还原 README.md
+    if [ -f "$README_BACKUP" ]; then
+        mv "$README_BACKUP" "$VSCODE_EXT_DIR/README.md"
+        print_info "已还原扩展目录的 README.md"
+    fi
 }
 
 # 本地安装扩展
