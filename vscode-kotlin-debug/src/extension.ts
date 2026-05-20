@@ -173,10 +173,18 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // 监听调试停止事件（暂停时刷新协程视图）
+    // 通过 DebugAdapterTracker 拦截 DAP stopped 事件，在断点命中/单步时刷新协程视图
     context.subscriptions.push(
-        vscode.debug.onDidChangeActiveDebugSession(() => {
-            coroutineViewProvider.fetchAndRefresh();
+        vscode.debug.registerDebugAdapterTrackerFactory('kotlin', {
+            createDebugAdapterTracker(_session: vscode.DebugSession): vscode.DebugAdapterTracker {
+                return {
+                    onDidSendMessage(message: vscode.DebugProtocolMessage & { type?: string; event?: string }) {
+                        if (message.type === 'event' && message.event === 'stopped') {
+                            coroutineViewProvider.fetchAndRefresh();
+                        }
+                    }
+                };
+            }
         })
     );
 

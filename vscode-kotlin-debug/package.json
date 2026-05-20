@@ -2,7 +2,7 @@
   "name": "kotlin-debug",
   "displayName": "Kotlin Debug",
   "description": "Kotlin debugger for VSCode using kotlin-debugger DAP",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "schizobulia",
   "license": "MIT",
   "repository": {
@@ -35,6 +35,14 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "languages": [
+      {
+        "id": "kotlin",
+        "aliases": ["Kotlin", "kotlin"],
+        "extensions": [".kt", ".kts"],
+        "mimetypes": ["text/x-kotlin"]
+      }
+    ],
     "commands": [
       {
         "command": "kotlin-debug.generateLaunchConfig",
