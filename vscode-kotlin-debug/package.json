@@ -2,7 +2,7 @@
   "name": "kotlin-debug",
   "displayName": "Kotlin Debug",
   "description": "Kotlin debugger for VSCode using kotlin-debugger DAP",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "schizobulia",
   "license": "MIT",
   "repository": {
